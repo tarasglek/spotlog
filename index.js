@@ -43,8 +43,37 @@ function uploadContentToS3(content, s3, remote) {
 function uploadToS3(dir, s3, prefix) {
 	var files = fs.readdirSync(dir);
 	files.forEach(function (f){
-		var content = fs.readFileSync(dir + "/" + f);
-		uploadContentToS3(content, s3, prefix + "/" + f);
+		var local = fs.readFileSync(dir + "/" + f);
+		var s3key = prefix + "/" + f
+		s3.get(s3key).on('response', function (res, err) {
+			var remote = "";
+			// No log file on server -> uploads ours, no need to merge
+			if (res.statusCode == 404) {
+				res.end();
+				uploadContentToS3(local, s3, s3key);
+			}
+			res.on('data', function (data) {
+				remote += data.toString();
+			})
+			res.on('end', function () {
+				var total = {};
+				// merge remote and new local entry to avoid duplicates
+				// todo, sort keys before output
+				(remote+local).trim().split("\n").forEach(function (line) {
+					var s = line.split(",");
+					total[s[0]] = s[1]
+				});
+				var ret = ""
+				for (var key in total) {
+					ret += key + "," + total[key] + "\n"
+				}
+				uploadContentToS3(ret, s3, s3key);
+			})
+			res.on('error', function (error) {
+				throw error
+			})
+		}).end();
+		//console.log(content.toString().split("\n").map(function (x) {return x.split(",")}))
 	})
 }
 
