@@ -164,7 +164,7 @@ function main() {
 	  , bucket: config.outBucket
 	});	
 	async.waterfall([
-		/*function (callback) {
+		function (callback) {
 			// download stuff from S3
 			retrieveLogs(s3in, indir, callback);	
 		},
@@ -174,12 +174,12 @@ function main() {
 				processLog(x, outdir, outputFiles);
 			})
 			var result = Object.keys(outputFiles);
-			fs.writeFileSync("ls.json", JSON.stringify(result))
+			//fs.writeFileSync("ls.json", JSON.stringify(result))
 			callback(null, result)
-		},*/
+		},/*
 		function (callback) {
 			callback(null, JSON.parse(fs.readFileSync("ls.json")))
-		},
+		},*/
 		function (processed_files, callback) {
 			uploadToS3(processed_files, s3out, "spot-prices", 50, callback)
 		},
