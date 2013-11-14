@@ -189,7 +189,11 @@ function main() {
 		}
 		], 
 		function (err, result) {
-			console.log("all done:" + [err,result])
+			if (config.loopTimeout) {
+				console.log("Will run again in " + config.loopTimeout + "ms")
+				setTimeout(main, config.loopTimeout)
+			} else
+				console.log("all done:" + [err,result])
 		});
 }
 
