@@ -114,14 +114,14 @@ function downloadFile(s3, remoteFile, localFile, callback) {
 }
 
 //function downloadFile(filename, )
-function download(s3, files, transformer, arg_callback) {
-	async.map(files, 
+function download(s3, files, transformer, limit, arg_callback) {
+	async.mapLimit(files, limit,
 		function(f, map_callback) {
 			downloadFile(s3, f, transformer(f), map_callback)
 		}, arg_callback);
 }
 
-function retrieveLogs(s3, dest, callback) {
+function retrieveLogs(s3, dest, limit, callback) {
 	s3.list({}, function (err, data) {
 		if (err)
 			return callback(err);
@@ -133,7 +133,7 @@ function retrieveLogs(s3, dest, callback) {
 			return dest + "/" + remote.replace(".gz", ".csv")
 		}
 		var items = data.Contents.map(function (x) {return x.Key});
-		download(s3, items, remote2local_transformer, callback)
+		download(s3, items, remote2local_transformer, limit, callback)
 	})
 
 }
@@ -166,7 +166,7 @@ function main() {
 	async.waterfall([
 		function (callback) {
 			// download stuff from S3
-			retrieveLogs(s3in, indir, callback);	
+			retrieveLogs(s3in, indir, 50, callback);	
 		},
 		function (downloaded_files, callback) {
 			var outputFiles = {}
@@ -189,7 +189,7 @@ function main() {
 		}
 		], 
 		function (err, result) {
-			console.log("all done:" + result)
+			console.log("all done:" + [err,result])
 		});
 }
 
