@@ -2,8 +2,6 @@ const fs = require('fs');
 const knox = require('knox');
 const zlib = require('zlib');
 const async = require('async');
-const outdir = process.argv[3];
-const indir = process.argv[2]
 
 function processLog(logfile, outdir, outputFiles) {
 	var str = fs.readFileSync(logfile).toString().trim()
@@ -140,6 +138,10 @@ function retrieveLogs(s3, dest, limit, callback) {
 
 function main() {
 	var config = JSON.parse(fs.readFileSync("config.json"))
+
+	const outdir = config.outdir || "input";
+	const indir = config.indir || "output";
+	
 	try {
 		fs.mkdirSync(outdir)
 	} catch (e) {

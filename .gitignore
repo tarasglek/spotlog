@@ -215,6 +215,6 @@ pip-log.txt
 .mr.developer.cfg
 
 node_modules/
-data/
-out/
+input/
+output/
 config.json
