@@ -56,7 +56,7 @@ function uploadContentToS3(content, s3, remote, callback) {
 function uploadToS3(files, s3, prefix, limit, callback) {
 	function mapperUploadToS3(f, map_callback) {
 		var local = fs.readFileSync(f);
-		var s3key = prefix + "/" + f
+		var s3key = prefix + "/" + f.replace(/.*\//, "")
 		s3.get(s3key).on('response', function (res, err) {
 			var remote = "";
 			// No log file on server -> uploads ours, no need to merge
