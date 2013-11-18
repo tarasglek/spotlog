@@ -2,12 +2,12 @@ const fs = require('fs');
 const knox = require('knox');
 const zlib = require('zlib');
 const async = require('async');
+const cluster = require('cluster');
 
 function processLog(logfile, outdir, outputFiles) {
 	var str = fs.readFileSync(logfile).toString().trim()
 	if (!str.length) {
-		console.log(logfile + " is empty")
-		return
+		throw (logfile + " is empty")
 	}
 
 	var loglines = str.split('\n');
@@ -100,12 +100,13 @@ function downloadFile(s3, remoteFile, localFile, callback) {
 	  	onDownloadError(err)
 	  	return;
 	  }
+	  resp.on('error', onDownloadError);
+
       var writeStream = fs.createWriteStream(localFile);
       
-      resp.on('error', onDownloadError);
-      resp.on('end', function () {
-      	console.log(remoteFile + "=>" + localFile)
-      	callback(null, localFile)
+      writeStream.on('finish', function () {
+      	//console.log(remoteFile + "=>" + localFile)
+      	callback(null, {"remote":remoteFile, "local":localFile})
       });
       resp.pipe(zlib.createGunzip()).pipe(writeStream);
 	})		
@@ -134,6 +135,26 @@ function retrieveLogs(s3, dest, limit, callback) {
 		download(s3, items, remote2local_transformer, limit, callback)
 	})
 
+}
+
+function s3move(s3, outBucket, outPrefix, files, callback) {
+	var copyAndMove = function (file, callback) {
+		var dest = outPrefix + "/" + file
+		var copy_handler = function(res){
+			if (res.statusCode != 200) {
+				return callback(new Error("s3 Copy failed code:"+res.statusCode))
+			}
+			console.log("copied "+ file + " to " + dest)
+			callback(null, file)
+		}
+		var req = s3.copyTo(file, outBucket, dest).on('response', copy_handler).end();
+	}
+	async.mapLimit(files, 50, copyAndMove, function (err, ls) {
+		if (err)
+			return callback(err)
+		//s3.deleteMultiple(ls, callback)
+		callback(null, ls)
+	});
 }
 
 function main() {
@@ -165,6 +186,7 @@ function main() {
 	  , secret: config.secretAccessKey
 	  , bucket: config.outBucket
 	});	
+
 	async.waterfall([
 		function (callback) {
 			// download stuff from S3
@@ -172,31 +194,60 @@ function main() {
 		},
 		function (downloaded_files, callback) {
 			var outputFiles = {}
-			downloaded_files.forEach(function (x) {
-				processLog(x, outdir, outputFiles);
-			})
+			var logUrls = []
+			try {
+				downloaded_files.forEach(function (x) {
+					processLog(x.local, outdir, outputFiles);
+					logUrls.push(x.remote)
+				})
+			} catch (e) {
+				return callback(e, null)
+			}
 			var result = Object.keys(outputFiles);
 			//fs.writeFileSync("ls.json", JSON.stringify(result))
-			callback(null, result)
+			callback(null, {"processed_files":result, "logUrls":logUrls})
 		},/*
 		function (callback) {
 			callback(null, JSON.parse(fs.readFileSync("ls.json")))
 		},*/
-		function (processed_files, callback) {
-			uploadToS3(processed_files, s3out, "spot-prices", 50, callback)
+		function (data, callback) {
+			uploadToS3(data.processed_files, s3out, "spot-prices", 50, function(err, uploaded_ls) {
+				if (err)
+					callback(err)
+				callback(null, data.logUrls)
+			})
+		},
+		function (logUrls, callback) {
+			s3move(s3in, config.processedBucket, "archive", logUrls, callback);
 		},
 		function (uploads, callback) {
-			console.log("final_step:"+uploads)
+			//console.log("final_step:"+uploads)
 			callback()
 		}
 		], 
 		function (err, result) {
 			if (config.loopTimeout) {
 				console.log("Will run again in " + config.loopTimeout + "ms")
-				setTimeout(main, config.loopTimeout)
-			} else
-				console.log("all done:" + [err,result])
+				setTimeout(process.exit, config.loopTimeout)
+			} else {
+				console.log("all done(no loopTimeout):" + [err,result])
+				process.exit(1);
+			}
 		});
 }
 
-main();
+if (cluster.isMaster) {
+	cluster.fork();
+	// keep restarting the child
+	cluster.on('exit', function(worker, code, signal) {
+		if (code == 0) {
+			console.log("Looks like worker finished successfully, respawning");
+			cluster.fork();
+		} else {
+			console.log("Worker failed with code:"+code)
+			process.exit(code)
+		}
+	});
+} else {
+	main();
+}
