@@ -157,7 +157,7 @@ function s3move(s3, outBucket, outPrefix, files, deleteFiles, callback) {
 	async.mapLimit(files, 50, copyAndMove, function (err, ls) {
 		if (err)
 			return callback(err)
-		if (deleteFiles) {
+		if (deleteFiles && ls.length) {
 			console.log("delete from s3:" + ls);
 			s3.deleteMultiple(ls, callback)
 		} else
