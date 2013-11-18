@@ -142,7 +142,7 @@ function retrieveLogs(s3, dest, limit, callback) {
 
 }
 
-function s3move(s3, outBucket, outPrefix, files, callback) {
+function s3move(s3, outBucket, outPrefix, files, deleteFiles, callback) {
 	var copyAndMove = function (file, callback) {
 		var dest = outPrefix + "/" + file
 		var copy_handler = function(res){
@@ -157,8 +157,10 @@ function s3move(s3, outBucket, outPrefix, files, callback) {
 	async.mapLimit(files, 50, copyAndMove, function (err, ls) {
 		if (err)
 			return callback(err)
-		//s3.deleteMultiple(ls, callback)
-		callback(null, ls)
+		if (deleteFiles) {
+			s3.deleteMultiple(ls, callback)
+		} else
+			callback(null, ls)
 	});
 }
 
@@ -223,7 +225,7 @@ function main() {
 			})
 		},
 		function (logUrls, callback) {
-			s3move(s3in, config.processedBucket, "archive", logUrls, callback);
+			s3move(s3in, config.processedBucket, "archive", logUrls, !config.keepFiles, callback);
 		},
 		function (uploads, callback) {
 			//debug("final_step:"+uploads)
