@@ -158,6 +158,7 @@ function s3move(s3, outBucket, outPrefix, files, deleteFiles, callback) {
 		if (err)
 			return callback(err)
 		if (deleteFiles) {
+			console.log("delete from s3:" + ls);
 			s3.deleteMultiple(ls, callback)
 		} else
 			callback(null, ls)
