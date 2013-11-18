@@ -4,6 +4,11 @@ const zlib = require('zlib');
 const async = require('async');
 const cluster = require('cluster');
 
+function debug(msg) {
+	if (0)
+		console.log.apply(this, arguments)
+}
+
 function processLog(logfile, outdir, outputFiles) {
 	var str = fs.readFileSync(logfile).toString().trim()
 	if (!str.length) {
@@ -28,7 +33,7 @@ function processLog(logfile, outdir, outputFiles) {
 var outgoing = 0;
 function uploadContentToS3(content, s3, remote, callback) {
 	outgoing++;
-	console.log(outgoing + " outgoing files")
+	debug(outgoing + " outgoing files")
 	var req = s3.put(remote, {
 		'Content-Length': content.length
 			, 'Content-Type': 'application/json'});
@@ -41,7 +46,7 @@ function uploadContentToS3(content, s3, remote, callback) {
 			}
 	});
 	req.on('error', function(err) {
-		console.log("Retrying " + remote + " in 1s");
+		debug("Retrying " + remote + " in 1s");
 		setTimeout(function() {
 			outgoing--;
 			uploadContentToS3(content, s3, remote, callback);
@@ -82,16 +87,16 @@ function uploadToS3(files, s3, prefix, limit, callback) {
 				map_callback(error)
 			})
 		}).end();
-		//console.log(content.toString().split("\n").map(function (x) {return x.split(",")}))
+		//debug(content.toString().split("\n").map(function (x) {return x.split(",")}))
 	}
 	async.mapLimit(files, limit, mapperUploadToS3, callback)
 }
 
 function downloadFile(s3, remoteFile, localFile, callback) {
 	function onDownloadError(err) {
-		console.log("Error downloading " + remoteFile + ":" + err)
+		debug("Error downloading " + remoteFile + ":" + err)
       	setTimeout(function() {
-	      	console.log("Retrying download of " + remoteFile);
+	      	debug("Retrying download of " + remoteFile);
 			downloadFile(s3, remoteFile, localFile, callback);
 		}, 1000);
 	}
@@ -105,7 +110,7 @@ function downloadFile(s3, remoteFile, localFile, callback) {
       var writeStream = fs.createWriteStream(localFile);
       
       writeStream.on('finish', function () {
-      	//console.log(remoteFile + "=>" + localFile)
+      	//debug(remoteFile + "=>" + localFile)
       	callback(null, {"remote":remoteFile, "local":localFile})
       });
       resp.pipe(zlib.createGunzip()).pipe(writeStream);
@@ -144,7 +149,7 @@ function s3move(s3, outBucket, outPrefix, files, callback) {
 			if (res.statusCode != 200) {
 				return callback(new Error("s3 Copy failed code:"+res.statusCode))
 			}
-			console.log("copied "+ file + " to " + dest)
+			debug("copied "+ file + " to " + dest)
 			callback(null, file)
 		}
 		var req = s3.copyTo(file, outBucket, dest).on('response', copy_handler).end();
@@ -221,7 +226,7 @@ function main() {
 			s3move(s3in, config.processedBucket, "archive", logUrls, callback);
 		},
 		function (uploads, callback) {
-			//console.log("final_step:"+uploads)
+			//debug("final_step:"+uploads)
 			callback()
 		}
 		], 
@@ -241,7 +246,7 @@ if (cluster.isMaster) {
 	// keep restarting the child
 	cluster.on('exit', function(worker, code, signal) {
 		if (code == 0) {
-			console.log("Looks like worker finished successfully, respawning");
+			debug("Looks like worker finished successfully, respawning");
 			cluster.fork();
 		} else {
 			console.log("Worker failed with code:"+code)
