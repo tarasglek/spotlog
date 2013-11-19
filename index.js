@@ -62,14 +62,11 @@ function uploadToS3(files, s3, prefix, limit, callback) {
 		var s3key = prefix + "/" + f.replace(/.*\//, "")
 		s3.get(s3key).on('response', function (res, err) {
 			var remote = "";
-			// No log file on server -> uploads ours, no need to merge
-			if (res.statusCode == 404) {
-				uploadContentToS3(local, s3, s3key, map_callback);
-				return;
+			if (res.statusCode == 200) {
+				res.on('data', function (data) {
+					remote += data.toString();
+				})
 			}
-			res.on('data', function (data) {
-				remote += data.toString();
-			})
 			res.on('end', function () {
 				var total = {};
 				// merge remote and new local entry to avoid duplicates
@@ -224,6 +221,7 @@ function main() {
 				if (err)
 					callback(err)
 				callback(null, data.logUrls)
+				console.log("Uploaded: "+uploaded_ls);
 			})
 		},
 		function (logUrls, callback) {
