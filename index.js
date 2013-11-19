@@ -4,8 +4,10 @@ const zlib = require('zlib');
 const async = require('async');
 const cluster = require('cluster');
 
+var gDebug = false;
+
 function debug(msg) {
-	if (0)
+	if (gDebug)
 		console.log.apply(this, arguments)
 }
 
@@ -35,14 +37,14 @@ function uploadContentToS3(content, s3, remote, callback) {
 	outgoing++;
 	debug(outgoing + " outgoing files")
 	var req = s3.put(remote, {
-		'Content-Length': content.length
-			, 'Content-Type': 'application/json'});
+		'Content-Length': content.length,
+		'Content-Type': 'text/plain'});
 	req.on('response', function(res){
 			outgoing--;
 			if (200 == res.statusCode) {
 				callback(null, req.url)
 			} else {
-				throw new Error("Unknown s3 upload code: " + res.statusCode)
+				callback(new Error("Unknown s3 upload code: " + res.statusCode))
 			}
 	});
 	req.on('error', function(err) {
@@ -62,11 +64,11 @@ function uploadToS3(files, s3, prefix, limit, callback) {
 		var s3key = prefix + "/" + f.replace(/.*\//, "")
 		s3.get(s3key).on('response', function (res, err) {
 			var remote = "";
-			if (res.statusCode == 200) {
-				res.on('data', function (data) {
+			res.on('data', function (data) {
+				if (res.statusCode == 200) {
 					remote += data.toString();
-				})
-			}
+				}
+			})
 			res.on('end', function () {
 				var total = {};
 				// merge remote and new local entry to avoid duplicates
@@ -135,6 +137,7 @@ function retrieveLogs(s3, dest, limit, callback) {
 			return dest + "/" + remote.replace(".gz", ".csv")
 		}
 		var items = data.Contents.map(function (x) {return x.Key});
+		debug("Downloading " + items.length + " logs")
 		download(s3, items, remote2local_transformer, limit, callback)
 	})
 
@@ -166,6 +169,8 @@ function s3move(s3, outBucket, outPrefix, files, deleteFiles, callback) {
 function main() {
 	var config = JSON.parse(fs.readFileSync("config.json"))
 
+	gDebug = config.debug;
+
 	const outdir = config.outdir || "input";
 	const indir = config.indir || "output";
 	
@@ -192,7 +197,6 @@ function main() {
 	  , secret: config.secretAccessKey
 	  , bucket: config.outBucket
 	});	
-
 	async.waterfall([
 		function (callback) {
 			// download stuff from S3
