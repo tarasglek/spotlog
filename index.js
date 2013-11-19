@@ -65,6 +65,7 @@ function uploadToS3(files, s3, prefix, limit, callback) {
 			// No log file on server -> uploads ours, no need to merge
 			if (res.statusCode == 404) {
 				uploadContentToS3(local, s3, s3key, map_callback);
+				return;
 			}
 			res.on('data', function (data) {
 				remote += data.toString();
