@@ -77,20 +77,23 @@ function s3ListObjects(s3, options, callback) {
   var req = s3.listObjects(options, lister)
 }
 
+var S3GetUngzip = async.compose(function (data, callback) {
+                                  zlib.gunzip(data.Body, callback);
+                                },
+                                function (params, callback) {
+                                  params.s3.getObject(params.params, callback);
+                                });
+
 function processS3Log(s3, file, config, ret, callback) {
-  async.waterfall([
-                    function (callback) {
-                      var cfg = {'Bucket':config.cloudTrailBucket, 'Key':file}
-                      s3.getObject(cfg, callback);
-                    },
-                    function (data, callback) {
-                      zlib.gunzip(data.Body, callback);
-                    },
-                    function (data, callback) {
-                      logItems(JSON.parse(data), config, ret)
-                      callback(null, null);
-                    }
-                  ], callback)
+  S3GetUngzip({'s3':s3, 'params':{'Bucket':config.cloudTrailBucket, 'Key':file}},
+               function (err, data) {
+                 if (err)
+                   return callback(err);
+                 logItems(JSON.parse(data), config, ret)
+                 // empty callback to signify completion
+                 // result is passed back via ret
+                 callback(null, null);
+               })
 }
 
 function updateInstanceJSONWithTerminateTime(filename, time) {
@@ -111,6 +114,7 @@ function foldTerminations(logEntries, config, callback) {
     filesToUpload["instances/log/" + (new Date().getTime()) + ".csv"] = filename;
   }
 
+  var terminatesToResolve = []
   for (var instanceId in logEntries) {
     var entry = logEntries[instanceId]
     var terminateTime = entry['TerminateInstances']
@@ -119,13 +123,21 @@ function foldTerminations(logEntries, config, callback) {
       if (run) {
         updateInstanceJSONWithTerminateTime(run, terminateTime);
       } else {
-        console.log("can't match terminate with run for " + instanceId)
+        terminatesToResolve.push([instanceId, terminateTime])
       }
     }
     if (run)
-      filesToUpload["instances/info/" + instanceId + ".json"] = run
+      filesToUpload[config.instancePrefix + instanceId + ".json"] = run
   }
-  callback(null, filesToUpload)
+  function resolveTerminate(tuple, callback) {
+    callback(null);
+  }
+  async.mapLimit(terminatesToResolve, 400, resolveTerminate,
+                 function (err) {
+                   if (err)
+                     return callback(err);
+                   callback(null, filesToUpload)
+                 })
 }
 
 function uploadToS3(s3, config, uploadMap, callback) {
@@ -171,7 +183,9 @@ function main() {
                     function (files, callback) {
                       var ret = {};
                       async.mapLimit(files, 400, 
-                                     function (file, filecallback) {processS3Log(s3, file, config, ret, filecallback)},
+                                     function (file, filecallback) {
+                                       processS3Log(s3, file, config, ret, filecallback)
+                                     },
                                      function (err) {
                                        callback(err, ret);
                                      })
