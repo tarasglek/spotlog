@@ -108,7 +108,7 @@ function foldTerminations(logEntries, config, callback) {
     log = log.sort(function (a, b) {return a[0] - b[0]}).map(function(x) {return x.toString()}).join("\n");
     var filename = config.workingDir + "/log.txt"; 
     fs.writeFileSync(filename, log);
-    filesToUpload["/instances/log/" + (new Date().getTime())] = filename;
+    filesToUpload["instances/log/" + (new Date().getTime()) + ".csv"] = filename;
   }
 
   for (var instanceId in logEntries) {
@@ -123,7 +123,7 @@ function foldTerminations(logEntries, config, callback) {
       }
     }
     if (run)
-      filesToUpload["/instances/info/" + instanceId + ".json"] = run
+      filesToUpload["instances/info/" + instanceId + ".json"] = run
   }
   callback(null, filesToUpload)
 }
@@ -135,13 +135,15 @@ function uploadToS3(s3, config, uploadMap, callback) {
                        zlib.gzip(fs.readFileSync(local), callback);
                      },
                      function (gzipbody, callback) {
+                       console.log(config.outBucket, key, gzipbody.length);
                        s3.putObject({'Bucket':config.outBucket, 
                                     'Key':key,
+                                    'Body': gzipbody,
                                     'ACL':'public-read',
-                                    'Body':gzipbody,
                                     'ContentEncoding':'gzip',
                                     'ContentType':'text/plain'}, callback);
-                     }], callback);
+                     }
+                    ], callback);
   }
   async.mapLimit(Object.keys(uploadMap), 40, uploader, callback);
 }
