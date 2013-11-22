@@ -5,6 +5,7 @@
   "license": "BSD",
   "dependencies": {
     "knox": "*",
-    "async": "*"
+    "async": "*",
+    "aws-sdk": "*"
   }
 }
