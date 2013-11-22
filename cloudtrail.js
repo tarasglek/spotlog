@@ -77,7 +77,7 @@ function s3ListObjects(s3, options, callback) {
   var req = s3.listObjects(options, lister)
 }
 
-var S3GetUngzip = async.compose(function (data, callback) {
+var S3getObjectGunzip = async.compose(function (data, callback) {
                                   zlib.gunzip(data.Body, callback);
                                 },
                                 function (params, callback) {
@@ -85,7 +85,7 @@ var S3GetUngzip = async.compose(function (data, callback) {
                                 });
 
 function processS3Log(s3, file, config, ret, callback) {
-  S3GetUngzip({'s3':s3, 'params':{'Bucket':config.cloudTrailBucket, 'Key':file}},
+  S3getObjectGunzip({'s3':s3, 'params':{'Bucket':config.cloudTrailBucket, 'Key':file}},
                function (err, data) {
                  if (err)
                    return callback(err);
@@ -103,15 +103,28 @@ function updateInstanceJSONWithTerminateTime(filename, time) {
   console.log("updated:"+ filename);
 }
 
-function foldTerminations(logEntries, config, callback) {
+/**
+ * This function is complicated
+ * it:
+ * a) sees RunInstances json and schedules it for upload
+ * b) folds TerminateInstances timestamps into RunInstances json from this run
+ * c) folds TerminateInstances timestamps into RunInstances json from S3(and schedules these for reupload)
+ */
+function foldTerminations(s3, logEntries, config, callback) {
+  function instanceJSONRemote(instanceId) {
+    return config.instancePrefix + instanceId + ".json"
+  }
+  function instanceJSONLocal(instanceId) {
+    return config.workingDir + "/" + instanceId + ".json"
+  }
   var filesToUpload = {}
   var log = logEntries.log;
   if (log) {
     delete logEntries['log']
-    log = log.sort(function (a, b) {return a[0] - b[0]}).map(function(x) {return x.toString()}).join("\n");
+    log = log.sort(function (a, b) {return a[0] - b[0]}).join("\n");
     var filename = config.workingDir + "/log.txt"; 
     fs.writeFileSync(filename, log);
-    filesToUpload["instances/log/" + (new Date().getTime()) + ".csv"] = filename;
+    filesToUpload[config.instanceLogPrefix + "info-" + (new Date().getTime()) + ".csv"] = filename;
   }
 
   var terminatesToResolve = []
@@ -123,19 +136,42 @@ function foldTerminations(logEntries, config, callback) {
       if (run) {
         updateInstanceJSONWithTerminateTime(run, terminateTime);
       } else {
+        // we failed to find a local json file to put terminate info into
         terminatesToResolve.push([instanceId, terminateTime])
       }
     }
     if (run)
-      filesToUpload[config.instancePrefix + instanceId + ".json"] = run
+      filesToUpload[instanceJSONRemote(instanceId)] = run
   }
   function resolveTerminate(tuple, callback) {
-    callback(null);
+    var instanceId = tuple[0]
+    var terminateTime = tuple[1]
+    var remote = instanceJSONRemote(instanceId);
+    S3getObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
+               function (err, data) {
+                 if (err) {
+                   if (err.statusCode == 404) {
+                     console.log("404 while looking for " + remote);
+                     return callback(null, tuple);
+                   }
+                   return callback(err);
+                 }
+                 var filename = instanceJSONLocal(instanceId);
+                 fs.writeFileSync(filename, data);
+                 updateInstanceJSONWithTerminateTime(filename, terminateTime);         
+                 filesToUpload[remote] = filename
+                 callback(null, null);
+               })
   }
   async.mapLimit(terminatesToResolve, 400, resolveTerminate,
-                 function (err) {
+                 function (err, missingTerminates) {
                    if (err)
                      return callback(err);
+                   var missingLog = missingTerminates.filter(function (x) {return x != null}).join("\n")
+                   var name = "orphanTerminates-" + (new Date().getTime()) + ".csv";
+                   var filename = config.workingDir + "/" + name;
+                   fs.writeFileSync(filename, missingLog);
+                   filesToUpload[config.instanceLogPrefix + name] = filename;
                    callback(null, filesToUpload)
                  })
 }
@@ -160,6 +196,13 @@ function uploadToS3(s3, config, uploadMap, callback) {
   async.mapLimit(Object.keys(uploadMap), 40, uploader, callback);
 }
 
+function chunkArray(array, n ) {
+    if ( !array.length ) {
+        return [];
+    }
+    return [ array.slice( 0, n ) ].concat( chunkArray(array.slice(n), n) );
+}
+
 function main() {
   var config = JSON.parse(fs.readFileSync("config.json"))
   try {
@@ -173,10 +216,10 @@ function main() {
   var processedLogs = null;
   //console.log(s3)
   async.waterfall([ function (callback) {
-                      s3ListObjects(s3, {'Bucket':config.cloudTrailBucket}, function(err, ls) {
+                      s3ListObjects(s3, {'Bucket':config.cloudTrailBucket, 'Prefix':'CloudTrail/'},
+                                    function(err, ls) {
                                       var files = ls.filter(function (x) {return x.Size > 0})
                                         .map(function (x) {return x.Key})
-                                    //    .slice(0,100);
                                      callback(null, files)
                                    });
                     },
@@ -192,11 +235,44 @@ function main() {
                       processedLogs = files
                     },
                     function (logmap, callback) {
-                      foldTerminations(logmap, config, callback);
+                      foldTerminations(s3, logmap, config, callback);
                     },
                     function (uploadMap, callback) {
                       uploadToS3(s3, config, uploadMap, callback);
+                    },
+                    function (ignore, callback) {
+                      // archive the processed logs
+                      console.log('archiving ' + processedLogs.length + " logs");
+                      async.mapLimit(processedLogs, 400, 
+                                     function (key, callback) {
+                                       s3.copyObject({'Bucket':config.cloudTrailBucket,
+                                                      'Key': 'archive/' + key,
+                                                      'CopySource': config.cloudTrailBucket + "/" + key,
+                                                     }, callback);
+                                     },
+                                     callback)
+                    },
+                    function (ignore, callback) {
+                      //delete processed logs
+                      var chunkedBy1000 = chunkArray(processedLogs, 1000);
+                      console.log('deleting ' + processedLogs.length + " logs");
+                      async.mapLimit(chunkedBy1000, 400,
+                                     function (keys, callback) {
+                                       var keys = keys.map(function(x){return {'Key':'archive/'+x}})
+                                       s3.deleteObjects({'Bucket':config.cloudTrailBucket,
+                                                         'Delete':{'Objects':keys}
+                                                        }
+                                                        ,function (err, data) {
+                                                          if (err)
+                                                            return callback(err);
+                                                          if (data.Errors)
+                                                            return callback(data.Errors)
+                                                          callback(null, data);
+                                                        });
+                                     }, callback);
+                      
                     }
+                    //todo: produce an index in instances/log/
                   ],
                   function (err, result) {
                     if (err)
