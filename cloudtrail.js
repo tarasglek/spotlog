@@ -167,11 +167,13 @@ function foldTerminations(s3, logEntries, config, callback) {
                  function (err, missingTerminates) {
                    if (err)
                      return callback(err);
-                   var missingLog = missingTerminates.filter(function (x) {return x != null}).join("\n")
-                   var name = "orphanTerminates-" + (new Date().getTime()) + ".csv";
-                   var filename = config.workingDir + "/" + name;
-                   fs.writeFileSync(filename, missingLog);
-                   filesToUpload[config.instanceLogPrefix + name] = filename;
+                   if (missingTerminates.length) {
+                     var missingLog = missingTerminates.filter(function (x) {return x != null}).join("\n")
+                     var name = "orphanTerminates-" + (new Date().getTime()) + ".csv";
+                     var filename = config.workingDir + "/" + name;
+                     fs.writeFileSync(filename, missingLog);
+                     filesToUpload[config.instanceLogPrefix + name] = filename;
+                   }
                    callback(null, filesToUpload)
                  })
 }
@@ -271,8 +273,30 @@ function main() {
                                                         });
                                      }, callback);
                       
+                    },
+                    //produce an index in instances/log/...todo: delete uploaded files from local disk
+                    function (ignore, callback) {
+                      s3ListObjects(s3, {'Bucket':config.outBucket, 'Prefix':config.instanceLogPrefix},
+                                    function(err, ls) {
+                                      var files = ls.filter(function (x) {
+                                                              return x.Size > 0 && !/index.txt$/.test(x.Key);
+                                                            })
+                                        .map(function (x) {return x.Key.replace(/.*\//, '')})
+                                      var body = files.sort(function (a, b) {return a.localeCompare(b) * -1})
+                                        .join("\n");
+                                      callback(null, body)
+                                    });
+                      
+                    },
+                    zlib.gzip,
+                    function (gzipbody, callback) {
+                      s3.putObject({'Bucket':config.outBucket, 
+                                    'Key': config.instanceLogPrefix + "index.txt",
+                                    'Body': gzipbody,
+                                    'ACL':'public-read',
+                                    'ContentEncoding':'gzip',
+                                    'ContentType':'text/plain'}, callback);
                     }
-                    //todo: produce an index in instances/log/
                   ],
                   function (err, result) {
                     if (err)
