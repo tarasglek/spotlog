@@ -265,7 +265,7 @@ function main() {
                                                         ,function (err, data) {
                                                           if (err)
                                                             return callback(err);
-                                                          if (data.Errors)
+                                                          if (data.Errors && data.Errors.length)
                                                             return callback(data.Errors)
                                                           callback(null, data);
                                                         });
