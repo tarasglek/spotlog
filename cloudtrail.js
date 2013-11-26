@@ -148,13 +148,6 @@ function uploadToS3(s3, config, uploadMap, callback) {
   async.mapLimit(Object.keys(uploadMap), 40, uploader, callback);
 }
 
-function chunkArray(array, n ) {
-    if ( !array.length ) {
-        return [];
-    }
-    return [ array.slice( 0, n ) ].concat( chunkArray(array.slice(n), n) );
-}
-
 function main() {
   var config = JSON.parse(fs.readFileSync("config.json"))
   try {
@@ -186,36 +179,16 @@ function main() {
                       uploadToS3(s3, config, uploadMap, callback);
                     },
                     function (ignore, callback) {
-                      // archive the processed logs
+                      // move processed logs to archive dir
                       console.log('archiving ' + processedLogs.length + " logs");
-                      async.mapLimit(processedLogs, 400, 
-                                     function (key, callback) {
-                                       s3.copyObject({'Bucket':config.cloudTrailBucket,
-                                                      'Key': 'archive/' + key,
-                                                      'CopySource': config.cloudTrailBucket + "/" + key,
-                                                     }, callback);
+                      tarasS3.S3Move(s3, {'Bucket':config.cloudTrailBucket}, processedLogs, 400,
+                                     function (key) {
+                                       return {'Key':'archive/' + key, 'CopySource': config.cloudTrailBucket + "/" + key}
                                      },
-                                     callback)
-                    },
-                    function (ignore, callback) {
-                      //delete processed logs
-                      var chunkedBy1000 = chunkArray(processedLogs, 1000);
-                      console.log('deleting ' + processedLogs.length + " logs");
-                      async.mapLimit(chunkedBy1000, 400,
-                                     function (keys, callback) {
-                                       var keys = keys.map(function(x){return {'Key':'archive/'+x}})
-                                       s3.deleteObjects({'Bucket':config.cloudTrailBucket,
-                                                         'Delete':{'Objects':keys}
-                                                        }
-                                                        ,function (err, data) {
-                                                          if (err)
-                                                            return callback(err);
-                                                          if (data.Errors && data.Errors.length)
-                                                            return callback(data.Errors)
-                                                          callback(null, data);
-                                                        });
-                                     }, callback);
-                      
+                                     function(key) { // delete transformer
+                                       return {'Key':'archive/' + key}
+                                     },
+                                     callback);
                     },
                     //produce an index in instances/log/...todo: delete uploaded files from local disk
                     function (ignore, callback) {

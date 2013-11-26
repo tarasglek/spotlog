@@ -42,7 +42,7 @@ var S3GetObjectGunzip = async.compose(function (data, callback) {
                                 });
 
 /**
- * applies function to every file in bucket returned by an s3 list operation
+ * applies function to every ungzipped file in bucket returned by an s3 list operation
  * mapper - function(fileName, fileContents, callback) that is applied...must call callback with error or result
  */
 function S3MapBucket(s3, s3params, limit, mapper, callback) {
@@ -71,8 +71,44 @@ function S3MapBucket(s3, s3params, limit, mapper, callback) {
                     }
                   ], callback)
 }
+
+function chunkArray(array, n ) {
+    if ( !array.length ) {
+        return [];
+    }
+    return [ array.slice( 0, n ) ].concat( chunkArray(array.slice(n), n) );
+}
+
+function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, callback) {
+  async.waterfall([
+                    function(callback) {
+                      async.mapLimit(keys, limit, 
+                                     function (key, callback) {
+                                       s3.copyObject(combineOptions(s3params, copy_tranformer(key)), callback);
+                                     },
+                                     callback)
+                    },
+                    function(ignore, callback) {
+                      var chunkedBy1000 = chunkArray(keys, 1000);
+                      async.mapLimit(chunkedBy1000, limit,
+                                     function (keys, callback) {
+                                       var keys = keys.map(delete_transformer)
+                                       s3.deleteObjects(combineOptions(s3params, {'Delete':{'Objects':keys}}),
+                                                        function (err, data) {
+                                                          if (err)
+                                                            return callback(err);
+                                                          if (data.Errors && data.Errors.length)
+                                                            return callback(data.Errors)
+                                                          callback(null, data);
+                                                        });
+                                     }, callback);
+                    }
+                  ], callback);
+}
+
 module.exports = {
   S3ListObjects: S3ListObjects, 
   S3GetObjectGunzip: S3GetObjectGunzip,
-  S3MapBucket: S3MapBucket
+  S3MapBucket: S3MapBucket,
+  S3Move: S3Move
 };
