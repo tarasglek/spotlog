@@ -1,7 +1,8 @@
 const fs = require('fs');
 const zlib = require('zlib');
-const async = require('async');
 const AWS = require('aws-sdk');
+const async = require('async');
+const tarasS3 = require('./taras-s3.js');
 
 function logItem(item, config, retmap) {
   switch(item.eventName) {
@@ -43,57 +44,6 @@ function logItem(item, config, retmap) {
 function logItems(log, config, ret) {
   log.Records.forEach(function (x) {logItem(x, config, ret)})
   return ret;
-}
-
-function combineOptions(a, b) {
-  var ret = {}
-  for (var i in a)
-    ret[i] = a[i]
-  for (var i in b)
-    ret[i] = b[i]
-  return ret;
-}
-
-function s3ListObjects(s3, options, callback) {
-  var retls = null;
-  function lister(err, data) {
-    if (err)
-      return callback(err);
-
-    if (!retls)
-      retls = data.Contents;
-    else
-      retls = retls.concat(data.Contents)
-
-    if (data.IsTruncated) {
-      var lastKey = data.Contents[data.Contents.length - 1].Key
-      //console.log(retls.length, lastKey);
-      s3.listObjects(combineOptions(options, {'Marker':lastKey}), lister)
-    } else {
-      callback(null, retls);
-    }
-  }
-  
-  var req = s3.listObjects(options, lister)
-}
-
-var S3getObjectGunzip = async.compose(function (data, callback) {
-                                  zlib.gunzip(data.Body, callback);
-                                },
-                                function (params, callback) {
-                                  params.s3.getObject(params.params, callback);
-                                });
-
-function processS3Log(s3, file, config, ret, callback) {
-  S3getObjectGunzip({'s3':s3, 'params':{'Bucket':config.cloudTrailBucket, 'Key':file}},
-               function (err, data) {
-                 if (err)
-                   return callback(err);
-                 logItems(JSON.parse(data), config, ret)
-                 // empty callback to signify completion
-                 // result is passed back via ret
-                 callback(null, null);
-               })
 }
 
 function updateInstanceJSONWithTerminateTime(filename, time) {
@@ -147,7 +97,7 @@ function foldTerminations(s3, logEntries, config, callback) {
     var instanceId = tuple[0]
     var terminateTime = tuple[1]
     var remote = instanceJSONRemote(instanceId);
-    S3getObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
+    tarasS3.S3GetObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
                function (err, data) {
                  if (err) {
                    if (err.statusCode == 404) {
@@ -215,26 +165,19 @@ function main() {
   }
 
   var s3 = new AWS.S3({'accessKeyId':config.accessKeyId, 'secretAccessKey':config.secretAccessKey});
-  var processedLogs = null;
+  var processedLogs = [];
   //console.log(s3)
   async.waterfall([ function (callback) {
-                      s3ListObjects(s3, {'Bucket':config.cloudTrailBucket, 'Prefix':'CloudTrail/'},
-                                    function(err, ls) {
-                                      var files = ls.filter(function (x) {return x.Size > 0})
-                                        .map(function (x) {return x.Key})
-                                     callback(null, files)
-                                   });
-                    },
-                    function (files, callback) {
                       var ret = {};
-                      async.mapLimit(files, 400, 
-                                     function (file, filecallback) {
-                                       processS3Log(s3, file, config, ret, filecallback)
-                                     },
-                                     function (err) {
-                                       callback(err, ret);
-                                     })
-                      processedLogs = files
+                      tarasS3.S3MapBucket(s3, {'Bucket':config.cloudTrailBucket, 'Prefix':'CloudTrail/'}, 400,
+                                          function (fileName, fileContents, callback) {
+                                            logItems(JSON.parse(fileContents), config, ret);
+                                            processedLogs.push(fileName);
+                                            callback(null, null);
+                                          },
+                                          function (err, ignore) {
+                                            callback(err, ret);
+                                          })
                     },
                     function (logmap, callback) {
                       foldTerminations(s3, logmap, config, callback);
@@ -276,7 +219,7 @@ function main() {
                     },
                     //produce an index in instances/log/...todo: delete uploaded files from local disk
                     function (ignore, callback) {
-                      s3ListObjects(s3, {'Bucket':config.outBucket, 'Prefix':config.instanceLogPrefix},
+                      tarasS3.S3ListObjects(s3, {'Bucket':config.outBucket, 'Prefix':config.instanceLogPrefix},
                                     function(err, ls) {
                                       var files = ls.filter(function (x) {
                                                               return x.Size > 0 && !/index.txt$/.test(x.Key);
