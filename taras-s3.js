@@ -79,6 +79,9 @@ function chunkArray(array, n ) {
     return [ array.slice( 0, n ) ].concat( chunkArray(array.slice(n), n) );
 }
 
+/**
+ * performs an s3 copy followed by a delete once all of the copies succeed
+ */
 function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, callback) {
   async.waterfall([
                     function(callback) {
@@ -106,9 +109,19 @@ function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, 
                   ], callback);
 }
 
+function S3GzipPutObject(s3, s3params, body, callback) {
+  var put = async.compose(function (zdata, callback) {
+                            s3.putObject(combineOptions(s3params, {'Body': zdata}), callback)    
+                          },
+                          zlib.gzip
+                         );
+  put(body, callback);
+}
+
 module.exports = {
   S3ListObjects: S3ListObjects, 
   S3GetObjectGunzip: S3GetObjectGunzip,
+  S3GzipPutObject: S3GzipPutObject,
   S3MapBucket: S3MapBucket,
   S3Move: S3Move
 };

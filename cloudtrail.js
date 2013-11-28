@@ -53,6 +53,10 @@ function updateInstanceJSONWithTerminateTime(filename, time) {
   console.log("updated:"+ filename);
 }
 
+function instanceJSONRemoteFromConfig(instanceId, config) {
+  return config.instancePrefix + instanceId + ".json"
+}
+
 /**
  * This function is complicated
  * it:
@@ -62,7 +66,7 @@ function updateInstanceJSONWithTerminateTime(filename, time) {
  */
 function foldTerminations(s3, logEntries, config, callback) {
   function instanceJSONRemote(instanceId) {
-    return config.instancePrefix + instanceId + ".json"
+    return instanceJSONRemoteFromConfig(instanceId, config);
   }
   function instanceJSONLocal(instanceId) {
     return config.workingDir + "/" + instanceId + ".json"
@@ -131,21 +135,69 @@ function foldTerminations(s3, logEntries, config, callback) {
 function uploadToS3(s3, config, uploadMap, callback) {
   function uploader(key, callback) {
     var local = uploadMap[key];
-    async.waterfall([function(callback) {
-                       zlib.gzip(fs.readFileSync(local), callback);
-                     },
-                     function (gzipbody, callback) {
-                       console.log(config.outBucket, key, gzipbody.length);
-                       s3.putObject({'Bucket':config.outBucket, 
-                                    'Key':key,
-                                    'Body': gzipbody,
-                                    'ACL':'public-read',
-                                    'ContentEncoding':'gzip',
-                                    'ContentType':'text/plain'}, callback);
-                     }
-                    ], callback);
+    tarasS3.S3GzipPutObject(s3, {'Bucket':config.outBucket, 
+                                 'Key':key,
+                                 'ACL':'public-read',
+                                 'ContentEncoding':'gzip', 
+                                 'ContentType':'text/plain'}, 
+                            fs.readFileSync(local), callback);
   }
   async.mapLimit(Object.keys(uploadMap), 40, uploader, callback);
+}
+
+function processSpotLog(fileContents, config, ret) {
+  var loglines = fileContents.split('\n');
+  loglines.forEach(function (line) {
+		     if (!line.length || line[0] == '#')
+		       return;
+		     var s = line.split("\t");
+		     var timestamp = new Date(s[0]);
+		     var nodeid = s[3];
+		     var charge = s[7].split(' ')[0];
+		     var payload = (timestamp * 1) + "," + charge + "\n";
+		     var filename = config.workingDir + "/spot-" + nodeid + ".csv";
+		     fs.appendFileSync(filename, payload);
+		     ret[nodeid] = filename;
+	           })
+}
+
+function uploadSpotData(s3, config, spot_files, callback) {
+  function uploader(instanceId, callback) {
+    var remote = instanceJSONRemoteFromConfig(instanceId, config)
+    tarasS3.S3GetObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
+               function (err, data) {
+                 if (err) {
+                   // 404 is a normal condition
+                   if (err.statusCode == 404) {
+                     console.log("Couldn't find " + instanceId + " info to write spot price to...TODO: DescribeInstances");
+                     data = {'spotPriceLog':{}}
+                   } else {
+                     return callback(err);
+                   }
+                 } else {
+                   console.log("Got " + instanceId);
+                   data = JSON.parse(data)
+                 }
+                 var filename = spot_files[instanceId]
+                 var spotPriceLog = fs.readFileSync(filename).toString().split("\n");
+                 for (var i in spotPriceLog) {
+                   var line = spotPriceLog[i].split(",");
+                   if (line.length != 2)
+                     continue;
+                   var timestamp = line[0]
+                   var price = line[1]
+                   data.spotPriceLog[timestamp] = price
+                 }
+                 tarasS3.S3GzipPutObject(s3, {'Bucket':config.outBucket, 
+                                              'Key': remote,
+                                              'ACL':'public-read',
+                                              'ContentEncoding':'gzip',
+                                              'ContentType':'text/plain'},
+                                         JSON.stringify(data), callback);
+               })
+    
+  }
+  async.mapLimit(Object.keys(spot_files), 400, uploader, callback);  
 }
 
 function main() {
@@ -177,7 +229,7 @@ function main() {
                     },
                     function (uploadMap, callback) {
                       uploadToS3(s3, config, uploadMap, callback);
-                    },
+                    },//todo: instead of moving stuff archive/ subdir, save last listed key for next run
                     function (ignore, callback) {
                       // move processed logs to archive dir
                       console.log('archiving ' + processedLogs.length + " logs");
@@ -185,7 +237,7 @@ function main() {
                                      function (key) {
                                        return {'Key':'archive/' + key, 'CopySource': config.cloudTrailBucket + "/" + key}
                                      },
-                                     function(key) { // delete transformer
+                                     function(key) { // debug delete transformer(deletes the stuff we just archived for now)
                                        return {'Key':'archive/' + key}
                                      },
                                      callback);
@@ -212,6 +264,21 @@ function main() {
                                     'ACL':'public-read',
                                     'ContentEncoding':'gzip',
                                     'ContentType':'text/plain'}, callback);
+                    },// now do spot logs
+                    function (ignore, callback) {
+                      var ret = {};
+                      tarasS3.S3MapBucket(s3, {'Bucket':config.processedBucket, 'Prefix':'archive/'}, 400,
+                                          function (fileName, fileContents, callback) {
+                                            processSpotLog(fileContents.toString(), config, ret);
+                                            processedLogs.push(fileName);
+                                            callback(null, null);
+                                          },
+                                          function (err, ignore) {
+                                            callback(err, ret);
+                                          })
+                    },
+                    function (spot_files, callback) {
+                      uploadSpotData(s3, config, spot_files, callback);
                     }
                   ],
                   function (err, result) {
