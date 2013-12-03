@@ -211,16 +211,46 @@ function main() {
 
   var s3 = new AWS.S3({'accessKeyId':config.accessKeyId, 'secretAccessKey':config.secretAccessKey});
   var processedLogs = [];
-  //console.log(s3)
+  var s3Markers = {}
+  
   async.waterfall([ function (callback) {
+                      if (config.debugState) {
+                        s3Markers = config.debugState;
+                        return callback(null);
+                      }
+                      s3.getObject({'Bucket':config.outBucket, 'Key':config.stateKey},
+                                  function (err, data) {
+                                    // 404 = no saved state yet
+                                    if (err && err.statusCode == 404)
+                                      return callback(null, null);
+                                    if (err)
+                                      return callback(err);
+                                    s3Markers = JSON.parse(data.Body);
+                                    callback(null, null);
+                                  });
+                      
+                    },
+                    function (ignore, callback) {
                       var ret = {};
-                      tarasS3.S3MapBucket(s3, {'Bucket':config.cloudTrailBucket, 'Prefix':'CloudTrail/'}, 400,
+                      var cfg = {'Bucket': config.cloudTrailBucket,
+                                 'Prefix': 'CloudTrail/'
+                                };
+                      if (s3Markers.CloudTrail)
+                        cfg['Marker'] = s3Markers.CloudTrail
+                      tarasS3.S3MapBucket(s3, cfg, 400,
                                           function (fileName, fileContents, callback) {
                                             logItems(JSON.parse(fileContents), config, ret);
                                             processedLogs.push(fileName);
-                                            callback(null, null);
+                                            callback(null, fileName);
                                           },
-                                          function (err, ignore) {
+                                          function (err, keys) {
+                                            if (keys.length) {
+                                              var lastKey = keys[keys.length - 1]
+                                              console.log(new Date(), "last cloudtail key", lastKey, keys.length)
+                                              s3Markers['CloudTrail'] = lastKey;
+                                            } else {
+                                              console.log("No New CloudTrail");
+                                            }
                                             callback(err, ret);
                                           })
                     },
@@ -229,18 +259,6 @@ function main() {
                     },
                     function (uploadMap, callback) {
                       uploadToS3(s3, config, uploadMap, callback);
-                    },//todo: instead of moving stuff archive/ subdir, save last listed key for next run
-                    function (ignore, callback) {
-                      // move processed logs to archive dir
-                      console.log('archiving ' + processedLogs.length + " logs");
-                      tarasS3.S3Move(s3, {'Bucket':config.cloudTrailBucket}, processedLogs, 400,
-                                     function (key) {
-                                       return {'Key':'archive/' + key, 'CopySource': config.cloudTrailBucket + "/" + key}
-                                     },
-                                     function(key) { // debug delete transformer(deletes the stuff we just archived for now)
-                                       return {'Key':'archive/' + key}
-                                     },
-                                     callback);
                     },
                     //produce an index in instances/log/...todo: delete uploaded files from local disk
                     function (ignore, callback) {
@@ -267,19 +285,39 @@ function main() {
                     },// now do spot logs
                     function (ignore, callback) {
                       var ret = {};
-                      tarasS3.S3MapBucket(s3, {'Bucket':config.processedBucket, 'Prefix':'archive/'}, 400,
+                      var cfg = {'Bucket':config.processedBucket, 'Prefix':'archive/'}
+                      if (s3Markers.spot)
+                        cfg['Marker'] = s3Markers.spot
+
+                      tarasS3.S3MapBucket(s3, cfg, 400,
                                           function (fileName, fileContents, callback) {
                                             processSpotLog(fileContents.toString(), config, ret);
                                             processedLogs.push(fileName);
-                                            callback(null, null);
+                                            callback(null, fileName);
                                           },
-                                          function (err, ignore) {
+                                          function (err, keys) {
+                                            if (keys.length) {
+                                              var lastKey = keys[keys.length - 1]
+                                              console.log("last spot key", lastKey, keys.length)
+                                              s3Markers['spot'] = lastKey;
+                                            } else {
+                                              console.log("No New spot");
+                                            }
                                             callback(err, ret);
                                           })
                     },
                     function (spot_files, callback) {
                       uploadSpotData(s3, config, spot_files, callback);
+                    },
+                    //save state to avoid reprocessing logs next time
+                    function (ignore, callback) {
+                      s3.putObject({'Bucket':config.outBucket, 
+                                    'Key': config.stateKey,
+                                    'Body': JSON.stringify(s3Markers),
+                                    'ACL':'public-read',
+                                    'ContentType':'text/plain'}, callback);
                     }
+
                   ],
                   function (err, result) {
                     if (err)
