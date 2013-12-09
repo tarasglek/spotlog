@@ -244,6 +244,8 @@ function main() {
                                             callback(null, fileName);
                                           },
                                           function (err, keys) {
+                                            if (err)
+                                              return callback(err);
                                             if (keys.length) {
                                               var lastKey = keys[keys.length - 1]
                                               console.log(new Date(), "last cloudtail key", lastKey, keys.length)

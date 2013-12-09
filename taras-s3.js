@@ -49,6 +49,9 @@ function S3MapBucket(s3, s3params, limit, mapper, callback) {
   async.waterfall([ function (callback) {
                       S3ListObjects(s3, s3params,
                                     function(err, ls) {
+                                      if (err)
+                                        return callback([err, s3params]);
+                                      
                                       var files = ls.filter(function (x) {return x.Size > 0})
                                         .map(function (x) {return x.Key})
                                       callback(null, files)
