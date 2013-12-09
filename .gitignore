@@ -218,3 +218,5 @@ node_modules/
 input/
 output/
 config.json
+/git.diff
+/logs-wip

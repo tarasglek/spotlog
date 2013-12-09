@@ -208,16 +208,22 @@ function main() {
     if (e.code != "EEXIST")
       throw e
   }
-
-  var s3 = new AWS.S3({'accessKeyId':config.accessKeyId, 'secretAccessKey':config.secretAccessKey});
+  
+  var cfg = null
+  if (config.accessKeyId) {
+    cfg = {'accessKeyId': config.accessKeyId,
+           'secretAccessKey': config.secretAccessKey};
+  }
+  var s3 = new AWS.S3(cfg);
   var processedLogs = [];
   var s3Markers = {}
   
   async.waterfall([ function (callback) {
                       if (config.debugState) {
                         s3Markers = config.debugState;
-                        return callback(null);
+                        return callback(null, null);
                       }
+
                       s3.getObject({'Bucket':config.outBucket, 'Key':config.stateKey},
                                   function (err, data) {
                                     // 404 = no saved state yet
@@ -228,13 +234,13 @@ function main() {
                                     s3Markers = JSON.parse(data.Body);
                                     callback(null, null);
                                   });
-                      
                     },
                     function (ignore, callback) {
                       var ret = {};
                       var cfg = {'Bucket': config.cloudTrailBucket,
-                                 'Prefix': 'CloudTrail/'
+                                 'Prefix': config.cloudTrailPrefix
                                 };
+                      
                       if (s3Markers.CloudTrail)
                         cfg['Marker'] = s3Markers.CloudTrail
                       tarasS3.S3MapBucket(s3, cfg, 400,
@@ -253,7 +259,7 @@ function main() {
                                             } else {
                                               console.log("No New CloudTrail");
                                             }
-                                            callback(err, ret);
+                                            callback(null, ret);
                                           })
                     },
                     function (logmap, callback) {
@@ -287,7 +293,7 @@ function main() {
                     },// now do spot logs
                     function (ignore, callback) {
                       var ret = {};
-                      var cfg = {'Bucket':config.processedBucket, 'Prefix':'archive/'}
+                      var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
                       if (s3Markers.spot)
                         cfg['Marker'] = s3Markers.spot
 
