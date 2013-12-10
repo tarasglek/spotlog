@@ -105,10 +105,11 @@ function foldTerminations(s3, logEntries, config, callback) {
                function (err, data) {
                  if (err) {
                    if (err.statusCode == 404) {
-                     console.log("404 while looking for " + remote);
-                     return callback(null, tuple);
+                     //start from an empty file
+                     data = "{}";
+                   } else {
+                     return callback(err);
                    }
-                   return callback(err);
                  }
                  var filename = instanceJSONLocal(instanceId);
                  fs.writeFileSync(filename, data);
@@ -170,14 +171,16 @@ function uploadSpotData(s3, config, spot_files, callback) {
                    // 404 is a normal condition
                    if (err.statusCode == 404) {
                      console.log("Couldn't find " + instanceId + " info to write spot price to...TODO: DescribeInstances");
-                     data = {'spotPriceLog':{}}
+                     data = {}
                    } else {
                      return callback(err);
                    }
                  } else {
-                   console.log("Got " + instanceId);
                    data = JSON.parse(data)
+                   console.log("Got " + instanceId);
                  }
+                 if (!data.spotPriceLog)
+                   data.spotPriceLog = {};
                  var filename = spot_files[instanceId]
                  var spotPriceLog = fs.readFileSync(filename).toString().split("\n");
                  for (var i in spotPriceLog) {
@@ -336,3 +339,4 @@ function main() {
 }
 
 main();
+// find -name *json | xargs  jq '.Records | .[] | if .eventName == "RunInstances" then . else {}  end ' > run
