@@ -12,7 +12,6 @@ function logItem(item, config, retmap) {
     if (rs) {
       var iset = rs.instancesSet
       iset.items.forEach(function (x) {
-                           // x
                            var time = new Date(item.eventTime).getTime();
                            var out = null;
                            if (item.eventName == "RunInstances") {
