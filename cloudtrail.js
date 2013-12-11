@@ -3,46 +3,41 @@ const zlib = require('zlib');
 const AWS = require('aws-sdk');
 const async = require('async');
 const tarasS3 = require('./taras-s3.js');
+const mkdirp = require('mkdirp');
 
-function logItem(item, config, retmap) {
+function logItem(config,item, updateJSON, callback) {
   switch(item.eventName) {
     case "TerminateInstances":
     case "RunInstances":
     var rs = item.responseElements
     if (rs) {
+      function iterator(x, callback) {
+        var time = new Date(item.eventTime).getTime();
+        var out = null;
+        var key = instanceJSONRemoteFromConfig(x.instanceId, config);
+        var ret = {}
+        if (item.eventName == "RunInstances") {
+          ret = {'runTime':time, 'instance':x}
+        } else if (item.eventName == "TerminateInstances") {
+          ret = {'terminateTime':time}
+        }
+        //var logentry = [time, item.eventName, x.instanceId]
+        //console.log(logentry)
+        updateJSON(key, ret, callback)
+      }
       var iset = rs.instancesSet
-      iset.items.forEach(function (x) {
-                           var time = new Date(item.eventTime).getTime();
-                           var out = null;
-                           if (item.eventName == "RunInstances") {
-                             var ret = {}
-                             ret.runTime = time
-                             ret.instance = x;
-                             var filename = config.workingDir + "/" + x.instanceId + ".json";
-                             fs.writeFileSync(filename, JSON.stringify(ret))
-                             out = filename
-                           } else if (item.eventName == "TerminateInstances") {
-                             out = time;
-                           }
-                           var logentry = [time, item.eventName, x.instanceId]
-                           if (!retmap.log)
-                             retmap.log = []
-                           retmap.log.push(logentry);
-                           console.log(logentry)
-                           var by_id = retmap[x.instanceId]
-                           if (!by_id)
-                             retmap[x.instanceId] = by_id = {}
-                           by_id[item.eventName] = out;
-                         })
+      return async.eachLimit(iset.items, 400, iterator, callback)
     } else { // no rs = failed invokation of ec2 command
-//      console.log(item)
     }
   }
+  callback(null);
 }
 
-function logItems(log, config, ret) {
-  log.Records.forEach(function (x) {logItem(x, config, ret)})
-  return ret;
+function logItems(config, log, updateJSON, callback) {
+  async.eachLimit(log.Records, 400,
+                 function (x, callback) {
+                   logItem(config, x, updateJSON, callback);
+                 }, callback);
 }
 
 function updateInstanceJSONWithTerminateTime(filename, time) {
@@ -56,85 +51,9 @@ function instanceJSONRemoteFromConfig(instanceId, config) {
   return config.instancePrefix + instanceId + ".json"
 }
 
-/**
- * This function is complicated
- * it:
- * a) sees RunInstances json and schedules it for upload
- * b) folds TerminateInstances timestamps into RunInstances json from this run
- * c) folds TerminateInstances timestamps into RunInstances json from S3(and schedules these for reupload)
- */
-function foldTerminations(s3, logEntries, config, callback) {
-  function instanceJSONRemote(instanceId) {
-    return instanceJSONRemoteFromConfig(instanceId, config);
-  }
-  function instanceJSONLocal(instanceId) {
-    return config.workingDir + "/" + instanceId + ".json"
-  }
-  var filesToUpload = {}
-  var log = logEntries.log;
-  if (log) {
-    delete logEntries['log']
-    log = log.sort(function (a, b) {return a[0] - b[0]}).join("\n");
-    var filename = config.workingDir + "/log.txt"; 
-    fs.writeFileSync(filename, log);
-    filesToUpload[config.instanceLogPrefix + "info-" + (new Date().getTime()) + ".csv"] = filename;
-  }
-
-  var terminatesToResolve = []
-  for (var instanceId in logEntries) {
-    var entry = logEntries[instanceId]
-    var terminateTime = entry['TerminateInstances']
-    var run = entry['RunInstances']
-    if (terminateTime) {
-      if (run) {
-        updateInstanceJSONWithTerminateTime(run, terminateTime);
-      } else {
-        // we failed to find a local json file to put terminate info into
-        terminatesToResolve.push([instanceId, terminateTime])
-      }
-    }
-    if (run)
-      filesToUpload[instanceJSONRemote(instanceId)] = run
-  }
-  function resolveTerminate(tuple, callback) {
-    var instanceId = tuple[0]
-    var terminateTime = tuple[1]
-    var remote = instanceJSONRemote(instanceId);
-    tarasS3.S3GetObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
-               function (err, data) {
-                 if (err) {
-                   if (err.statusCode == 404) {
-                     //start from an empty file
-                     data = "{}";
-                   } else {
-                     return callback(err);
-                   }
-                 }
-                 var filename = instanceJSONLocal(instanceId);
-                 fs.writeFileSync(filename, data);
-                 updateInstanceJSONWithTerminateTime(filename, terminateTime);         
-                 filesToUpload[remote] = filename
-                 callback(null, null);
-               })
-  }
-  async.mapLimit(terminatesToResolve, 400, resolveTerminate,
-                 function (err, missingTerminates) {
-                   if (err)
-                     return callback(err);
-                   if (missingTerminates.length) {
-                     var missingLog = missingTerminates.filter(function (x) {return x != null}).join("\n")
-                     var name = "orphanTerminates-" + (new Date().getTime()) + ".csv";
-                     var filename = config.workingDir + "/" + name;
-                     fs.writeFileSync(filename, missingLog);
-                     filesToUpload[config.instanceLogPrefix + name] = filename;
-                   }
-                   callback(null, filesToUpload)
-                 })
-}
-
-function uploadToS3(s3, config, uploadMap, callback) {
+function uploadToS3(s3, config, uploadDict, callback) {
   function uploader(key, callback) {
-    var local = uploadMap[key];
+    var local = uploadDict[key];
     tarasS3.S3GzipPutObject(s3, {'Bucket':config.outBucket, 
                                  'Key':key,
                                  'ACL':'public-read',
@@ -142,7 +61,11 @@ function uploadToS3(s3, config, uploadMap, callback) {
                                  'ContentType':'text/plain'}, 
                             fs.readFileSync(local), callback);
   }
-  async.mapLimit(Object.keys(uploadMap), 40, uploader, callback);
+  async.eachLimit(Object.keys(uploadDict), 400, uploader, 
+                  function(err) {
+                    console.log("finished uploadToS3");
+                    callback(err);
+                  });
 }
 
 function processSpotLog(fileContents, config, ret) {
@@ -161,45 +84,80 @@ function processSpotLog(fileContents, config, ret) {
 	           })
 }
 
-function uploadSpotData(s3, config, spot_files, callback) {
-  function uploader(instanceId, callback) {
-    var remote = instanceJSONRemoteFromConfig(instanceId, config)
-    tarasS3.S3GetObjectGunzip({'s3':s3, 'params':{'Bucket':config.outBucket, 'Key':remote}},
-               function (err, data) {
-                 if (err) {
-                   // 404 is a normal condition
-                   if (err.statusCode == 404) {
-                     console.log("Couldn't find " + instanceId + " info to write spot price to...TODO: DescribeInstances");
-                     data = {}
-                   } else {
-                     return callback(err);
-                   }
-                 } else {
-                   data = JSON.parse(data)
-                   console.log("Got " + instanceId);
-                 }
-                 if (!data.spotPriceLog)
-                   data.spotPriceLog = {};
-                 var filename = spot_files[instanceId]
-                 var spotPriceLog = fs.readFileSync(filename).toString().split("\n");
-                 for (var i in spotPriceLog) {
-                   var line = spotPriceLog[i].split(",");
-                   if (line.length != 2)
-                     continue;
-                   var timestamp = line[0]
-                   var price = line[1]
-                   data.spotPriceLog[timestamp] = price
-                 }
-                 tarasS3.S3GzipPutObject(s3, {'Bucket':config.outBucket, 
-                                              'Key': remote,
-                                              'ACL':'public-read',
-                                              'ContentEncoding':'gzip',
-                                              'ContentType':'text/plain'},
-                                         JSON.stringify(data), callback);
-               })
-    
+function mergeSpotData(updateJSON, config, spot_files, callback) {
+  function iterator(instanceId, callback) {
+    var key = instanceJSONRemoteFromConfig(instanceId, config)
+    var filename = spot_files[instanceId]
+    var spotPriceLog = fs.readFileSync(filename).toString().split("\n");
+    var ret = {'spotPriceLog':{}}
+    for (var i in spotPriceLog) {
+      var line = spotPriceLog[i].split(",");
+      if (line.length != 2)
+        continue;
+      var timestamp = line[0]
+      var price = line[1]
+      ret.spotPriceLog[timestamp] = price
+    }
+    updateJSON(key, ret, callback);
   }
-  async.mapLimit(Object.keys(spot_files), 400, uploader, callback);  
+  async.eachLimit(Object.keys(spot_files), 400, iterator, callback);  
+}
+
+/**
+ * This looks up a file in local cache, download queue and S3...final result is an updated file in local cache
+ * we use downloadDict to guard against race conditions
+ * todo multilevel combine
+*/
+function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback) {
+  var localFilename = config.workingDir + "/" + config.outBucket + "/" + key;
+  var localDir = localFilename.substring(0, localFilename.lastIndexOf('/'));
+
+  var inFlight = downloadDict[localFilename];
+  if (inFlight) {
+    console.log("Download race condition avoided, queued", key, newObj);
+    inFlight.obj = tarasS3.combineObjects(newObj, inFlight.obj);
+    inFlight.callbacks.push(callback);
+    downloadDict[localFilename] = newObj;
+    return; // we are done, our callback will get called as part of original inFlight request
+  } else {
+    inFlight = downloadDict[localFilename] = {'obj':newObj, 'callbacks':[callback]};
+  }
+
+  async.waterfall([
+    // try to read file from local cache before we go to out to s3
+    function (callback) {
+      fs.readFile(localFilename, function (err, data) {
+        if (err) {
+          var params = {'s3':s3, 'params':{'Bucket': config.outBucket, 'Key':key}};
+          return tarasS3.S3GetObjectGunzip(params, function (err, data) {
+            if (err) {
+              // 404 on s3 means this object is new stuff
+              if (err.statusCode == 404)
+                return callback(null, {});
+              else
+                return callback(err);
+            }
+            callback(null, JSON.parse(data));
+          })
+        }
+        callback(null, JSON.parse(data));
+      });
+    },
+    function (obj, callback) {
+      inFlight.obj = tarasS3.combineObjects(inFlight.obj, obj);
+      mkdirp.mkdirp(localDir, callback);
+    },
+    function(ignore, callback) {
+      str = JSON.stringify(inFlight.obj);
+      delete downloadDict[localFilename];
+      uploadDict[key] = localFilename;
+      fs.writeFile(localFilename, str, callback);
+    }
+  ],function (err, data) {
+    if (err)
+      return callback(err);
+    inFlight.callbacks.forEach(function (callback) {callback(null, null)});
+  });
 }
 
 function main() {
@@ -217,9 +175,14 @@ function main() {
            'secretAccessKey': config.secretAccessKey};
   }
   var s3 = new AWS.S3(cfg);
-  var processedLogs = [];
   var s3Markers = {}
-  
+  var uploadDict = {}
+  var downloadDict = {}
+  // curry some common params
+  function updateJSON(key, newObj, callback) {
+    return combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback);
+  }
+
   async.waterfall([ function (callback) {
                       if (config.debugState) {
                         s3Markers = config.debugState;
@@ -238,7 +201,6 @@ function main() {
                                   });
                     },
                     function (ignore, callback) {
-                      var ret = {};
                       var cfg = {'Bucket': config.cloudTrailBucket,
                                  'Prefix': config.cloudTrailPrefix
                                 };
@@ -247,9 +209,12 @@ function main() {
                         cfg['Marker'] = s3Markers.CloudTrail
                       tarasS3.S3MapBucket(s3, cfg, 400,
                                           function (fileName, fileContents, callback) {
-                                            logItems(JSON.parse(fileContents), config, ret);
-                                            processedLogs.push(fileName);
-                                            callback(null, fileName);
+                                            logItems(config,
+                                                     JSON.parse(fileContents),
+                                                     updateJSON,
+                                                     function (err, data) {
+                                                       callback(null, fileName);
+                                                     });
                                           },
                                           function (err, keys) {
                                             if (err)
@@ -261,40 +226,11 @@ function main() {
                                             } else {
                                               console.log("No New CloudTrail");
                                             }
-                                            callback(null, ret);
+                                            callback(null);
                                           })
-                    },
-                    function (logmap, callback) {
-                      foldTerminations(s3, logmap, config, callback);
-                    },
-                    function (uploadMap, callback) {
-                      uploadToS3(s3, config, uploadMap, callback);
-                    },
-                    //produce an index in instances/log/...todo: delete uploaded files from local disk
-                    function (ignore, callback) {
-                      tarasS3.S3ListObjects(s3, {'Bucket':config.outBucket, 'Prefix':config.instanceLogPrefix},
-                                    function(err, ls) {
-                                      var files = ls.filter(function (x) {
-                                                              return x.Size > 0 && !/index.txt$/.test(x.Key);
-                                                            })
-                                        .map(function (x) {return x.Key.replace(/.*\//, '')})
-                                      var body = files.sort(function (a, b) {return a.localeCompare(b) * -1})
-                                        .join("\n");
-                                      callback(null, body)
-                                    });
-                      
-                    },
-                    zlib.gzip,
-                    function (gzipbody, callback) {
-                      s3.putObject({'Bucket':config.outBucket, 
-                                    'Key': config.instanceLogPrefix + "index.txt",
-                                    'Body': gzipbody,
-                                    'ACL':'public-read',
-                                    'ContentEncoding':'gzip',
-                                    'ContentType':'text/plain'}, callback);
                     },// now do spot logs
-                    function (ignore, callback) {
-                      var ret = {};
+                    function (callback) {
+                      var ret = {}
                       var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
                       if (s3Markers.spot)
                         cfg['Marker'] = s3Markers.spot
@@ -317,10 +253,14 @@ function main() {
                                           })
                     },
                     function (spot_files, callback) {
-                      uploadSpotData(s3, config, spot_files, callback);
+                      mergeSpotData(updateJSON, config, spot_files, callback);
+                    },
+                    function (callback) {
+                      uploadToS3(s3, config, uploadDict, callback);
                     },
                     //save state to avoid reprocessing logs next time
-                    function (ignore, callback) {
+                    function (callback) {
+                      console.log('callback', callback);
                       s3.putObject({'Bucket':config.outBucket, 
                                     'Key': config.stateKey,
                                     'Body': JSON.stringify(s3Markers),
@@ -328,7 +268,7 @@ function main() {
                                     'ContentType':'text/plain'}, callback);
                     }
 
-                  ],
+                  ],//todo add index/log stuff
                   function (err, result) {
                     if (err)
                       throw err

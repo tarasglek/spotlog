@@ -2,7 +2,7 @@ const AWS = require('aws-sdk');
 const async = require('async');
 const zlib = require('zlib');
 
-function combineOptions(a, b) {
+function combineObjects(a, b) {
   var ret = {}
   for (var i in a)
     ret[i] = a[i]
@@ -25,7 +25,7 @@ function S3ListObjects(s3, options, callback) {
     if (data.IsTruncated) {
       var lastKey = data.Contents[data.Contents.length - 1].Key
       //console.log(retls.length, lastKey);
-      s3.listObjects(combineOptions(options, {'Marker':lastKey}), lister)
+      s3.listObjects(combineObjects(options, {'Marker':lastKey}), lister)
     } else {
       callback(null, retls);
     }
@@ -90,7 +90,7 @@ function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, 
                     function(callback) {
                       async.mapLimit(keys, limit, 
                                      function (key, callback) {
-                                       s3.copyObject(combineOptions(s3params, copy_tranformer(key)), callback);
+                                       s3.copyObject(combineObjects(s3params, copy_tranformer(key)), callback);
                                      },
                                      callback)
                     },
@@ -99,7 +99,7 @@ function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, 
                       async.mapLimit(chunkedBy1000, limit,
                                      function (keys, callback) {
                                        var keys = keys.map(delete_transformer)
-                                       s3.deleteObjects(combineOptions(s3params, {'Delete':{'Objects':keys}}),
+                                       s3.deleteObjects(combineObjects(s3params, {'Delete':{'Objects':keys}}),
                                                         function (err, data) {
                                                           if (err)
                                                             return callback(err);
@@ -114,7 +114,7 @@ function S3Move(s3, s3params, keys, limit, copy_tranformer, delete_transformer, 
 
 function S3GzipPutObject(s3, s3params, body, callback) {
   var put = async.compose(function (zdata, callback) {
-                            s3.putObject(combineOptions(s3params, {'Body': zdata}), callback)    
+                            s3.putObject(combineObjects(s3params, {'Body': zdata}), callback)    
                           },
                           zlib.gzip
                          );
@@ -126,5 +126,6 @@ module.exports = {
   S3GetObjectGunzip: S3GetObjectGunzip,
   S3GzipPutObject: S3GzipPutObject,
   S3MapBucket: S3MapBucket,
-  S3Move: S3Move
+  S3Move: S3Move,
+  combineObjects: combineObjects
 };

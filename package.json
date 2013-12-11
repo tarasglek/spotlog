@@ -6,6 +6,7 @@
   "dependencies": {
     "knox": "*",
     "async": "*",
-    "aws-sdk": "*"
+    "aws-sdk": "*",
+    "mkdirp":"*"
   }
 }
