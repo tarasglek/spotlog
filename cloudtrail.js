@@ -106,7 +106,7 @@ function mergeSpotData(updateJSON, config, spot_files, callback) {
 /**
  * This looks up a file in local cache, download queue and S3...final result is an updated file in local cache
  * we use downloadDict to guard against race conditions
- * todo multilevel combine
+ * 
 */
 function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback) {
   var localFilename = config.workingDir + "/" + config.outBucket + "/" + key;
@@ -183,6 +183,67 @@ function main() {
     return combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback);
   }
 
+  function processCloudTrail(callback) {
+    var cfg = {'Bucket': config.cloudTrailBucket,
+               'Prefix': config.cloudTrailPrefix
+              };
+    
+    if (s3Markers.CloudTrail)
+      cfg['Marker'] = s3Markers.CloudTrail
+    tarasS3.S3MapBucket(s3, cfg, 400,
+                        function (fileName, fileContents, callback) {
+                          logItems(config,
+                                   JSON.parse(fileContents),
+                                   updateJSON,
+                                   function (err, data) {
+                                     callback(null, fileName);
+                                   });
+                        },
+                        function (err, keys) {
+                          if (err)
+                            return callback(err);
+                          if (keys.length) {
+                            var lastKey = keys[keys.length - 1]
+                            console.log(new Date(), "last cloudtail key", lastKey, keys.length)
+                            s3Markers['CloudTrail'] = lastKey;
+                          } else {
+                            console.log("No New CloudTrail");
+                          }
+                          callback(null);
+                        })
+    
+  }
+
+  function processSpot(callback) {
+    async.waterfall([
+      function (callback) {
+        var ret = {}
+        var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
+        if (s3Markers.spot)
+          cfg['Marker'] = s3Markers.spot
+
+        tarasS3.S3MapBucket(s3, cfg, 400,
+                            function (fileName, fileContents, callback) {
+                              processSpotLog(fileContents.toString(), config, ret);
+                              processedLogs.push(fileName);
+                              callback(null, fileName);
+                            },
+                            function (err, keys) {
+                              if (keys.length) {
+                                var lastKey = keys[keys.length - 1]
+                                console.log("last spot key", lastKey, keys.length)
+                                s3Markers['spot'] = lastKey;
+                              } else {
+                                console.log("No New spot");
+                              }
+                              callback(err, ret);
+                            })
+      },
+      function (spot_files, callback) {
+        mergeSpotData(updateJSON, config, spot_files, callback);
+      }], callback);
+  }
+
   async.waterfall([ function (callback) {
                       if (config.debugState) {
                         s3Markers = config.debugState;
@@ -197,63 +258,11 @@ function main() {
                                     if (err)
                                       return callback(err);
                                     s3Markers = JSON.parse(data.Body);
-                                    callback(null, null);
+                                    callback(null);
                                   });
                     },
-                    function (ignore, callback) {
-                      var cfg = {'Bucket': config.cloudTrailBucket,
-                                 'Prefix': config.cloudTrailPrefix
-                                };
-                      
-                      if (s3Markers.CloudTrail)
-                        cfg['Marker'] = s3Markers.CloudTrail
-                      tarasS3.S3MapBucket(s3, cfg, 400,
-                                          function (fileName, fileContents, callback) {
-                                            logItems(config,
-                                                     JSON.parse(fileContents),
-                                                     updateJSON,
-                                                     function (err, data) {
-                                                       callback(null, fileName);
-                                                     });
-                                          },
-                                          function (err, keys) {
-                                            if (err)
-                                              return callback(err);
-                                            if (keys.length) {
-                                              var lastKey = keys[keys.length - 1]
-                                              console.log(new Date(), "last cloudtail key", lastKey, keys.length)
-                                              s3Markers['CloudTrail'] = lastKey;
-                                            } else {
-                                              console.log("No New CloudTrail");
-                                            }
-                                            callback(null);
-                                          })
-                    },// now do spot logs
                     function (callback) {
-                      var ret = {}
-                      var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
-                      if (s3Markers.spot)
-                        cfg['Marker'] = s3Markers.spot
-
-                      tarasS3.S3MapBucket(s3, cfg, 400,
-                                          function (fileName, fileContents, callback) {
-                                            processSpotLog(fileContents.toString(), config, ret);
-                                            processedLogs.push(fileName);
-                                            callback(null, fileName);
-                                          },
-                                          function (err, keys) {
-                                            if (keys.length) {
-                                              var lastKey = keys[keys.length - 1]
-                                              console.log("last spot key", lastKey, keys.length)
-                                              s3Markers['spot'] = lastKey;
-                                            } else {
-                                              console.log("No New spot");
-                                            }
-                                            callback(err, ret);
-                                          })
-                    },
-                    function (spot_files, callback) {
-                      mergeSpotData(updateJSON, config, spot_files, callback);
+                      async.parallel([processCloudTrail, processSpot], callback);
                     },
                     function (callback) {
                       uploadToS3(s3, config, uploadDict, callback);
