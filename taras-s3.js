@@ -3,11 +3,25 @@ const async = require('async');
 const zlib = require('zlib');
 
 function combineObjects(a, b) {
+  if (typeof(a) != 'object' || typeof(b) != 'object') {
+    if (a == b)
+      return b;
+    throw new Error("Can't combine "+ [a, b]);
+  }
+    
   var ret = {}
-  for (var i in a)
-    ret[i] = a[i]
-  for (var i in b)
+  for (var i in a) {
+    if (i in b) {
+      ret[i] = combineObjects(a[i], b[i]);
+    } else {
+      ret[i] = a[i]
+    }
+  }
+  for (var i in b) {
+    if (i in ret)
+      continue
     ret[i] = b[i]
+  }
   return ret;
 }
 
