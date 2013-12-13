@@ -1,5 +1,9 @@
 const fs = require('fs');
 
+function hours(ms) {
+  return Math.ceil((ms)/1000/60/60)
+}
+
 var file = process.argv[2]
 try {
   o = JSON.parse(fs.readFileSync(file))
@@ -12,6 +16,9 @@ if (!o.spotPriceLog || !o.terminateTime)
 
 var keys = Object.keys(o.spotPriceLog)
 var max = keys.reduce(function(a,b){return Math.max(a,b)})
+var min = keys.reduce(function(a,b){return Math.min(a,b)})
 
-var diff = Math.ceil((o.terminateTime - max)/1000/60)
-console.log(file, diff, keys.length, new Date(o.terminateTime).toString())
+var runHours = hours(o.terminateTime - min)
+var billingHours = keys.length
+var freeMinutes = Math.floor(((o.terminateTime - min) - (max - min))/1000/60 - 60)
+console.log(file, runHours, keys.length, freeMinutes, new Date(o.terminateTime).toString())
