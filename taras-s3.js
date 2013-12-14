@@ -76,8 +76,9 @@ function S3MapBucket(s3, s3params, limit, mapper, callback) {
                                      function (file, callback) {
                                        S3GetObjectGunzip({'s3':s3, 'params':{'Bucket':s3params.Bucket, 'Key':file}}, 
                                                          function (err, fileData) {
-                                                           if(err)
-                                                             return callback(err);
+                                                           if(err) {
+                                                             return callback([err, file]);
+                                                           }
                                                            mapper(file, fileData, callback)
                                                          })
                                      },

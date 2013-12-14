@@ -9,6 +9,8 @@ function logItem(config,item, updateJSON, callback) {
   switch(item.eventName) {
     case "TerminateInstances":
     case "RunInstances":
+    case "StartInstances":
+    case "StopInstances":
     var rs = item.responseElements
     if (rs) {
       function iterator(x, callback) {
@@ -20,6 +22,14 @@ function logItem(config,item, updateJSON, callback) {
           ret = {'runTime':time, 'instance':x}
         } else if (item.eventName == "TerminateInstances") {
           ret = {'terminateTime':time}
+        } else if (item.eventName == "StartInstances" || item.eventName == "StopInstances") {
+          ret = {}
+          var startStop = {};
+          startStop[time] = item.eventName;
+          ret['startStop'] = startStop;
+        }
+        if (ret == undefined) {
+          console.log("foo", JSON.stringify(ret))
         }
         //var logentry = [time, item.eventName, x.instanceId]
         //console.log(logentry)
@@ -64,6 +74,7 @@ function uploadToS3(s3, config, uploadDict, callback) {
   async.eachLimit(Object.keys(uploadDict), 400, uploader, 
                   function(err) {
                     console.log("finished uploadToS3");
+                    console.log(callback);
                     callback(err);
                   });
 }
@@ -115,7 +126,7 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
 
   var inFlight = downloadDict[localFilename];
   if (inFlight) {
-    console.log("Download race condition avoided, queued", key, newObj);
+    //console.log("Download race condition avoided, queued", key, newObj);
     inFlight.obj = tarasS3.combineObjects(newObj, inFlight.obj);
     inFlight.callbacks.push(callback);
     return; // we are done, our callback will get called as part of original inFlight request
@@ -206,10 +217,11 @@ function main() {
                                    JSON.parse(fileContents),
                                    updateJSON,
                                    function (err, data) {
-                                     callback(null, fileName);
+                                     callback(err, fileName);
                                    });
                         },
                         function (err, keys) {
+                          console.log("Cloudtrail log count:", keys.length);
                           if (err)
                             return callback(err);
                           if (keys.length) {
@@ -268,13 +280,13 @@ function main() {
                                     if (err)
                                       return callback(err);
                                     s3Markers = JSON.parse(data.Body);
-                                    callback(null);
+                                    callback(null, null);
                                   });
                     },
-                    function (callback) {
-                      async.parallel([processCloudTrail, processSpot], callback);
+                    function (ignore, callback) {
+                      async.parallel([processCloudTrail, processSpot],callback);
                     },
-                    function (callback) {
+                    function (ignore, callback) {
                       uploadToS3(s3, config, uploadDict, callback);
                     },
                     //save state to avoid reprocessing logs next time
