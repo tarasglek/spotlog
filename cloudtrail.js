@@ -118,7 +118,6 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
     console.log("Download race condition avoided, queued", key, newObj);
     inFlight.obj = tarasS3.combineObjects(newObj, inFlight.obj);
     inFlight.callbacks.push(callback);
-    downloadDict[localFilename] = newObj;
     return; // we are done, our callback will get called as part of original inFlight request
   } else {
     downloadDict[localFilename] = inFlight = {'obj':newObj, 'callbacks':[callback]};
