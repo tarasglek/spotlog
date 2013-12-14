@@ -89,6 +89,7 @@ function mergeSpotData(updateJSON, config, spot_files, callback) {
     var key = instanceJSONRemoteFromConfig(instanceId, config)
     var filename = spot_files[instanceId]
     var spotPriceLog = fs.readFileSync(filename).toString().split("\n");
+    fs.unlinkSync(filename);
     var ret = {'spotPriceLog':{}}
     for (var i in spotPriceLog) {
       var line = spotPriceLog[i].split(",");
@@ -120,14 +121,14 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
     downloadDict[localFilename] = newObj;
     return; // we are done, our callback will get called as part of original inFlight request
   } else {
-    inFlight = downloadDict[localFilename] = {'obj':newObj, 'callbacks':[callback]};
+    downloadDict[localFilename] = inFlight = {'obj':newObj, 'callbacks':[callback]};
   }
 
   async.waterfall([
     // try to read file from local cache before we go to out to s3
     function (callback) {
       fs.readFile(localFilename, function (err, data) {
-        if (err) {
+        function fallback() {
           var params = {'s3':s3, 'params':{'Bucket': config.outBucket, 'Key':key}};
           return tarasS3.S3GetObjectGunzip(params, function (err, data) {
             if (err) {
@@ -140,7 +141,17 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
             callback(null, JSON.parse(data));
           })
         }
-        callback(null, JSON.parse(data));
+        // missing file or invalid json are both reasons for concern
+        if (err) {
+          return fallback()
+        }
+        var obj;
+        try {
+          obj = JSON.parse(data)
+        }catch(e) {
+          return fallback()
+        }
+        callback(null, obj);
       });
     },
     function (obj, callback) {
