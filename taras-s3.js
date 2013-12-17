@@ -6,7 +6,7 @@ function combineObjects(a, b) {
   if (typeof(a) != 'object' || typeof(b) != 'object') {
     if (a == b)
       return b;
-    throw new Error("Can't combine "+ [a, b]);
+    throw new Error("Can't combine "+ JSON.stringify([a, b]));
   }
     
   var ret = {}
@@ -38,8 +38,10 @@ function S3ListObjects(s3, options, callback) {
 
     if (data.IsTruncated) {
       var lastKey = data.Contents[data.Contents.length - 1].Key
-      //console.log(retls.length, lastKey);
-      s3.listObjects(combineObjects(options, {'Marker':lastKey}), lister)
+      // override Marker, don't disturb original options
+      options = !options ? {} : combineObjects(options, {})
+      options['Marker'] = lastKey
+      s3.listObjects(options, lister)
     } else {
       callback(null, retls);
     }

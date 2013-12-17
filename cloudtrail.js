@@ -19,20 +19,25 @@ function logItem(config,item, updateJSON, callback) {
         var key = instanceJSONRemoteFromConfig(x.instanceId, config);
         var ret = {}
         if (item.eventName == "RunInstances") {
+          // do not report redundant commands
+          if(x.instanceState.name == "running")
+            return callback(null, null);
           ret = {'runTime':time, 'instance':x}
         } else if (item.eventName == "TerminateInstances") {
-          ret = {'terminateTime':time}
+          switch(x.previousState.name) {
+            // do not report redundant commands
+            case "terminated":
+            case "shutting-down":
+              return callback(null, null);
+            default:
+              ret = {'terminateTime':time}            
+          }
         } else if (item.eventName == "StartInstances" || item.eventName == "StopInstances") {
           ret = {}
           var startStop = {};
           startStop[time] = item.eventName;
           ret['startStop'] = startStop;
         }
-        if (ret == undefined) {
-          console.log("foo", JSON.stringify(ret))
-        }
-        //var logentry = [time, item.eventName, x.instanceId]
-        //console.log(logentry)
         updateJSON(key, ret, callback)
       }
       var iset = rs.instancesSet
