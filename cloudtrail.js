@@ -38,6 +38,7 @@ function logItem(config,item, updateJSON, callback) {
           startStop[time] = item.eventName;
           ret['startStop'] = startStop;
         }
+        //console.log(key/*,x.previousState.name*/, x.instanceState.name, ret)
         updateJSON(key, ret, callback)
       }
       var iset = rs.instancesSet
@@ -78,8 +79,6 @@ function uploadToS3(s3, config, uploadDict, callback) {
   }
   async.eachLimit(Object.keys(uploadDict), 400, uploader, 
                   function(err) {
-                    console.log("finished uploadToS3");
-                    console.log(callback);
                     callback(err);
                   });
 }
@@ -248,7 +247,6 @@ function main() {
         var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
         if (s3Markers.spot)
           cfg['Marker'] = s3Markers.spot
-
         tarasS3.S3MapBucket(s3, cfg, 400,
                             function (fileName, fileContents, callback) {
                               processSpotLog(fileContents.toString(), config, ret);
@@ -296,7 +294,6 @@ function main() {
                     },
                     //save state to avoid reprocessing logs next time
                     function (callback) {
-                      console.log('callback', callback);
                       s3.putObject({'Bucket':config.outBucket, 
                                     'Key': config.stateKey,
                                     'Body': JSON.stringify(s3Markers),

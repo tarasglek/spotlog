@@ -6,6 +6,10 @@ function combineObjects(a, b) {
   if (typeof(a) != 'object' || typeof(b) != 'object') {
     if (a == b)
       return b;
+    if (typeof(a) == typeof(b) && typeof(a) == 'number') {
+      console.log("warning: Math.max to combineObjects", a ,b);
+      return Math.max(a, b);
+    }
     throw new Error("Can't combine "+ JSON.stringify([a, b]));
   }
     
