@@ -299,6 +299,45 @@ function main() {
                                     'Body': JSON.stringify(s3Markers),
                                     'ACL':'public-read',
                                     'ContentType':'text/plain'}, callback);
+                    },
+                    function (ignore, callback) {
+                      // now log the files that were uploaded
+                      // each log entry is a linked list pointing at the previous entry
+                      // index.txt points at the head of the list
+                      var ret = {"instances": Object.keys(uploadDict)}
+                      if (!ret.instances.length) {
+                        console.log("Nothing to log");
+                        return callback(null, null);
+                      }
+                      var logName = Date.now() + ".json";
+                      var common = {'Bucket':config.outBucket, 
+                                    'ACL':'public-read',
+                                    'ContentType':'text/plain'
+                                    }
+                      var indexParam = {'Bucket':config.outBucket, 
+                                        'Key':config.instanceLogPrefix + "index.txt"}
+                      s3.getObject(indexParam, function (err, data) {
+                        if (err && err.statusCode == 404) {
+                          // do nothing, no .previous to record
+                          console.log("no previous logs")
+                        } else if (err) {
+                          return callback(err);
+                        } else {
+                          ret.previous = data.Body.toString();
+                        }
+                        tarasS3.S3GzipPutObject(s3, tarasS3.combineObjects(common, {'Key':config.instanceLogPrefix + logName,
+                                                                            'ContentEncoding':'gzip'}), 
+                                                JSON.stringify(ret),
+                                                function (err) {
+                                                  if (err)
+                                                    return callback(err);
+                                                  s3.putObject(tarasS3.combineObjects(common, {'Body':logName,
+                                                                                       'Key':config.instanceLogPrefix + "index.txt"
+                                                                                      }),
+                                                               callback);
+                                                });
+                      
+                      })
                     }
 
                   ],//todo add index/log stuff
