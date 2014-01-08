@@ -200,6 +200,12 @@ function main() {
            'secretAccessKey': config.secretAccessKey};
   }
   var s3 = new AWS.S3(cfg);
+  var logReadingS3 = s3;
+  
+  if (config.logKeys) {
+    logReadingS3 = new AWS.S3(config.logKeys);
+  }
+
   var s3Markers = {}
   var uploadDict = {}
   var downloadDict = {}
@@ -215,7 +221,7 @@ function main() {
     
     if (s3Markers.CloudTrail)
       cfg['Marker'] = s3Markers.CloudTrail
-    tarasS3.S3MapBucket(s3, cfg, 400,
+    tarasS3.S3MapBucket(logReadingS3, cfg, 400,
                         function (fileName, fileContents, callback) {
                           logItems(config,
                                    JSON.parse(fileContents),
@@ -247,7 +253,7 @@ function main() {
         var cfg = {'Bucket':config.spotLogBucket, 'Prefix':config.spotLogPrefix}
         if (s3Markers.spot)
           cfg['Marker'] = s3Markers.spot
-        tarasS3.S3MapBucket(s3, cfg, 400,
+        tarasS3.S3MapBucket(logReadingS3, cfg, 400,
                             function (fileName, fileContents, callback) {
                               processSpotLog(fileContents.toString(), config, ret);
                               processedLogs.push(fileName);
