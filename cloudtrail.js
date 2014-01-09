@@ -56,13 +56,6 @@ function logItems(config, log, updateJSON, callback) {
                  }, callback);
 }
 
-function updateInstanceJSONWithTerminateTime(filename, time) {
-  var stuff = JSON.parse(fs.readFileSync(filename));
-  stuff.terminateTime = time;
-  fs.writeFileSync(filename, JSON.stringify(stuff));
-  console.log("updated:"+ filename);
-}
-
 function instanceJSONRemoteFromConfig(instanceId, config) {
   return config.instancePrefix + instanceId + ".json"
 }
@@ -181,7 +174,7 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
   ],function (err, data) {
     if (err)
       return callback(err);
-    inFlight.callbacks.forEach(function (callback) {callback(null, null)});
+    inFlight.callbacks.forEach(function (callback) {callback(null, key)});
   });
 }
 
@@ -195,9 +188,8 @@ function main() {
   }
   
   var cfg = null
-  if (config.accessKeyId) {
-    cfg = {'accessKeyId': config.accessKeyId,
-           'secretAccessKey': config.secretAccessKey};
+  if (config.keys) {
+    cfg = config.keys;
   }
   var s3 = new AWS.S3(cfg);
   var logReadingS3 = s3;
@@ -275,6 +267,39 @@ function main() {
       }], callback);
   }
 
+  function describeInstances(callback) {
+    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":config.monitoringRegion},cfg))
+    ec2.describeInstances({}, function (err, data) { 
+      if (err)
+        return callback(err)
+      handleDescribeInstances(data)
+    });
+    function handleDescribeInstances(di) {
+      var todo = []
+
+      function looper(instance) {
+        if (instance.State.Name == "terminated") {
+          todo.push(instance);
+        }
+      }
+      di.Reservations.forEach(function (reservation) {
+        reservation.Instances.forEach(looper);
+      })
+      async.map(todo, function(instance, callback) {
+        var key = instanceJSONRemoteFromConfig(instance.InstanceId, config);
+        var newStuff = {"State":instance.State,
+                        "InstanceType": instance.InstanceType,
+                        "LaunchTime": instance.LaunchTime.getTime()
+                       }
+        if (instance.StateTransitionReason)
+          newStuff.StateTransitionReason = instance.StateTransitionReason
+        updateJSON(key, newStuff, function (err, data) {
+          console.log("describeInstances", err, data);
+          callback(err, data);
+        });
+      }, callback)
+    }
+  }
   async.waterfall([ function (callback) {
                       if (config.debugState) {
                         s3Markers = config.debugState;
@@ -293,7 +318,7 @@ function main() {
                                   });
                     },
                     function (ignore, callback) {
-                      async.parallel([processCloudTrail, processSpot],callback);
+                      async.parallel([processCloudTrail, processSpot, describeInstances],callback);
                     },
                     function (ignore, callback) {
                       uploadToS3(s3, config, uploadDict, callback);
