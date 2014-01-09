@@ -267,8 +267,8 @@ function main() {
       }], callback);
   }
 
-  function describeInstances(callback) {
-    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":config.monitoringRegion},cfg))
+  function describeInstances(region, callback) {
+    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},cfg))
     ec2.describeInstances({}, function (err, data) { 
       if (err)
         return callback(err)
@@ -288,8 +288,9 @@ function main() {
       async.map(todo, function(instance, callback) {
         var key = instanceJSONRemoteFromConfig(instance.InstanceId, config);
         var newStuff = {"State":instance.State,
-                        "InstanceType": instance.InstanceType,
-                        "LaunchTime": instance.LaunchTime.getTime()
+                        "instance":{"instanceType": instance.InstanceType},
+                        "LaunchTime": instance.LaunchTime.getTime(),
+                        "Tags":instance.Tags
                        }
         if (instance.StateTransitionReason)
           newStuff.StateTransitionReason = instance.StateTransitionReason
@@ -318,7 +319,13 @@ function main() {
                                   });
                     },
                     function (ignore, callback) {
-                      async.parallel([processCloudTrail, processSpot, describeInstances],callback);
+                      var todo = [processCloudTrail, processSpot];
+                      config.describeInstances.forEach(function (region) {
+                        todo.push(function(callback) {
+                          describeInstances(region, callback);
+                        })
+                      })
+                      async.parallel(todo, callback);
                     },
                     function (ignore, callback) {
                       uploadToS3(s3, config, uploadDict, callback);
