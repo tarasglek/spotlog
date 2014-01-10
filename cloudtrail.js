@@ -117,7 +117,7 @@ function mergeSpotData(updateJSON, config, spot_files, callback) {
  * we use downloadDict to guard against race conditions
  * 
 */
-function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback) {
+function combineObjectWithCachedS3File(config, upload, downloadDict, s3, key, newObj, callback) {
   var localFilename = config.workingDir + "/" + config.outBucket + "/" + key;
   var localDir = localFilename.substring(0, localFilename.lastIndexOf('/'));
 
@@ -168,8 +168,7 @@ function combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key
     function(ignore, callback) {
       str = JSON.stringify(inFlight.obj);
       delete downloadDict[localFilename];
-      uploadDict[key] = localFilename;
-      fs.writeFile(localFilename, str, callback);
+      upload(key, localFilename, str, callback);
     }
   ],function (err, data) {
     if (err)
@@ -201,9 +200,28 @@ function main() {
   var s3Markers = {}
   var uploadDict = {}
   var downloadDict = {}
+  function upload(key, localFilename, contents, callback) {
+    uploadDict[key] = localFilename;
+    fs.writeFile(localFilename, contents, callback);
+    console.log(localFilename)
+  } 
+  
+  function uploadAndCache(key, contents, callback) {
+    var localFilename = config.workingDir + "/" + config.outBucket + "/" + key;
+    var localDir = localFilename.substring(0, localFilename.lastIndexOf('/'));
+    async.waterfall([
+      function (callback) {
+        mkdirp.mkdirp(localDir, callback);
+      },
+      function (ignore, callback) {
+        upload(key, localFilename, contents, callback);
+      }
+    ], callback);
+  }
+
   // curry some common params
   function updateJSON(key, newObj, callback) {
-    return combineObjectWithCachedS3File(config, uploadDict, downloadDict, s3, key, newObj, callback);
+    return combineObjectWithCachedS3File(config, upload, downloadDict, s3, key, newObj, callback);
   }
 
   function processCloudTrail(callback) {
@@ -272,9 +290,17 @@ function main() {
     ec2.describeInstances({}, function (err, data) { 
       if (err)
         return callback(err)
-      handleDescribeInstances(data)
+      async.parallel([
+        function (callback) {
+          handleDescribeInstances(data, callback)
+        },
+        function (callback) {
+          uploadAndCache(config.instanceLogPrefix + region + "/DescribeInstances/" + Date.now() + ".json",
+                         JSON.stringify(data), callback);
+        }
+        ], callback);
     });
-    function handleDescribeInstances(di) {
+    function handleDescribeInstances(di, callback) {
       var todo = []
 
       function looper(instance) {
@@ -348,10 +374,6 @@ function main() {
                         return callback(null, null);
                       }
                       var logName = Date.now() + ".json";
-                      var common = {'Bucket':config.outBucket, 
-                                    'ACL':'public-read',
-                                    'ContentType':'text/plain'
-                                    }
                       var indexParam = {'Bucket':config.outBucket, 
                                         'Key':config.instanceLogPrefix + "index.txt"}
                       s3.getObject(indexParam, function (err, data) {
@@ -363,18 +385,20 @@ function main() {
                         } else {
                           ret.previous = data.Body.toString();
                         }
-                        tarasS3.S3GzipPutObject(s3, tarasS3.combineObjects(common, {'Key':config.instanceLogPrefix + logName,
-                                                                            'ContentEncoding':'gzip'}), 
-                                                JSON.stringify(ret),
-                                                function (err) {
-                                                  if (err)
-                                                    return callback(err);
-                                                  s3.putObject(tarasS3.combineObjects(common, {'Body':logName,
-                                                                                       'Key':config.instanceLogPrefix + "index.txt"
-                                                                                      }),
-                                                               callback);
-                                                });
-                      
+                        async.waterfall([
+                          function(callback) {
+                            uploadAndCache(config.instanceLogPrefix + logName, JSON.stringify(ret), callback);
+                          },
+                          function (ignore, callback) {
+                            s3.putObject({
+                              'Bucket':config.outBucket, 
+                              'ACL':'public-read',
+                              'ContentType':'text/plain',
+                              'Body':logName,
+                              'Key':config.instanceLogPrefix + "index.txt"
+                            }, callback)
+                          }
+                        ], callback);
                       })
                     }
 
