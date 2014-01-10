@@ -4,6 +4,7 @@ const AWS = require('aws-sdk');
 const async = require('async');
 const tarasS3 = require('./taras-s3.js');
 const mkdirp = require('mkdirp');
+const cluster = require('cluster');
 
 function logItem(config,item, updateJSON, callback) {
   switch(item.eventName) {
@@ -319,9 +320,12 @@ function main() {
       async.map(todo, function(instance, callback) {
         var key = instanceJSONRemoteFromConfig(instance.InstanceId, config);
         var newStuff = {"State":instance.State,
-                        "instance":{"instanceType": instance.InstanceType},
-                        "LaunchTime": instance.LaunchTime.getTime(),
-                        "Tags":instance.Tags
+                        "instance":
+                        {
+                          "instanceType": instance.InstanceType,
+                          "placement":{"availabilityZone":instance.Placement.AvailabilityZone}
+                        },
+                        "LaunchTime": instance.LaunchTime.getTime()
                        }
         if (instance.StateTransitionReason)
           newStuff.StateTransitionReason = instance.StateTransitionReason
@@ -374,6 +378,10 @@ function main() {
                       // each log entry is a linked list pointing at the previous entry
                       // index.txt points at the head of the list
                       var ret = {"instances": Object.keys(uploadDict)}
+                      for (var i = ret.instances.length - 1; i >= 0;i--) {
+                        if (ret.instances[i].indexOf(config.instancePrefix) == -1)
+                          ret.instances.splice(i, 1);
+                      }
                       if (!ret.instances.length) {
                         console.log("Nothing to log");
                         return callback(null, null);
@@ -394,7 +402,7 @@ function main() {
                           function(callback) {
                             uploadAndCache(config.instanceLogPrefix + logName, JSON.stringify(ret), callback);
                           },
-                          function (ignore, callback) {
+                          function (callback) {
                             s3.putObject({
                               'Bucket':config.outBucket, 
                               'ACL':'public-read',
@@ -402,6 +410,7 @@ function main() {
                               'Body':logName,
                               'Key':config.instanceLogPrefix + "index.txt"
                             }, callback)
+                            console.log("uploading index.txt");
                           }
                         ], callback);
                       })
@@ -410,11 +419,29 @@ function main() {
                   ],//todo add index/log stuff
                   function (err, result) {
                     if (err)
-                      throw err
+                      throw err;
                     console.log("all done:"+ JSON.stringify(result))
+                    process.exit(0);
                   }
   )
 }
 
-main();
-// find -name *json | xargs  jq '.Records | .[] | if .eventName == "RunInstances" then . else {}  end ' > run
+// argv check is to enter debug mode if additional args are present
+if (cluster.isMaster && process.argv.length == 2) {
+  cluster.fork();
+  // keep restarting the child
+  cluster.on('exit', 
+             function(worker, code, signal) {
+               var delay = 1000 * 60 * 10;//poll every 15min
+	       if (code == 0) {
+		 console.log("Looks like worker finished successfully, respawning in ", delay);
+	       } else {
+		 console.log("Worker failed with code:"+code)
+	       }
+               setTimeout(function () {
+                 cluster.fork();
+               }, delay);
+	     });
+} else {
+  main();
+}
