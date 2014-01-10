@@ -286,7 +286,12 @@ function main() {
   }
 
   function describeInstances(region, callback) {
-    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},cfg))
+    var keys = config.logKeys;
+    if (!keys)
+      keys = cfg
+    if (!keys)
+      return callback(new Error("Need keys to call describeInstances"), null)
+    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},keys))
     ec2.describeInstances({}, function (err, data) { 
       if (err)
         return callback(err)
