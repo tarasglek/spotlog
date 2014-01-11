@@ -329,6 +329,8 @@ function main() {
                        }
         if (instance.StateTransitionReason)
           newStuff.StateTransitionReason = instance.StateTransitionReason
+        if (instance.StateReason)
+          newStuff.StateReason = instance.StateReason
         updateJSON(key, newStuff, function (err, data) {
           console.log("describeInstances", err, data);
           callback(err, data);
