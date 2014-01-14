@@ -201,14 +201,19 @@ function main() {
   var s3Markers = {}
   var uploadDict = {}
   var downloadDict = {}
+  var filesToRemove = []
   function upload(key, localFilename, contents, callback) {
     uploadDict[key] = localFilename;
     fs.writeFile(localFilename, contents, callback);
     console.log(localFilename)
   } 
+
+  function localKey2Filename(key) {
+    return config.workingDir + "/" + config.outBucket + "/" + key;
+  }
   
   function uploadAndCache(key, contents, callback) {
-    var localFilename = config.workingDir + "/" + config.outBucket + "/" + key;
+    var localFilename = localKey2Filename(key)
     var localDir = localFilename.substring(0, localFilename.lastIndexOf('/'));
     async.waterfall([
       function (callback) {
@@ -380,6 +385,7 @@ function main() {
                       // each log entry is a linked list pointing at the previous entry
                       // index.txt points at the head of the list
                       var ret = {"instances": Object.keys(uploadDict)}
+                      filesToRemove = filesToRemove.concat(Object.keys(uploadDict));
                       uploadDict = {};
                       for (var i = ret.instances.length - 1; i >= 0;i--) {
                         if (ret.instances[i].indexOf(config.instancePrefix) == -1)
@@ -409,6 +415,7 @@ function main() {
                             uploadToS3(s3, config, uploadDict, callback);
                           },
                           function (callback) {
+                            filesToRemove = filesToRemove.concat(Object.keys(uploadDict));
                             s3.putObject({
                               'Bucket':config.outBucket, 
                               'ACL':'public-read',
@@ -420,6 +427,10 @@ function main() {
                           }
                         ], callback);
                       })
+                    },
+                    function (ignore, callback) {
+                      console.log("Removing ", filesToRemove.length, " files");
+                      async.each(filesToRemove.map(localKey2Filename), fs.unlink, callback);
                     }
                   ],//todo add index/log stuff
                   function (err, result) {
@@ -439,7 +450,7 @@ if (cluster.isMaster && process.argv.length == 2) {
              function(worker, code, signal) {
                var delay = 1000 * 60 * 10;//poll every 15min
 	       if (code == 0) {
-		 console.log("Looks like worker finished successfully, respawning in ", delay);
+		 console.log(new Date, "Looks like worker finished successfully, respawning in ", delay);
 	       } else {
 		 console.log("Worker failed with code:"+code)
 	       }
