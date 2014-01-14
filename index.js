@@ -366,6 +366,7 @@ function main() {
                     },
                     function (ignore, callback) {
                       uploadToS3(s3, config, uploadDict, callback);
+                      uploadDict = {};
                     },
                     //save state to avoid reprocessing logs next time
                     function (callback) {
@@ -404,6 +405,9 @@ function main() {
                           function(callback) {
                             uploadAndCache(config.instanceLogPrefix + logName, JSON.stringify(ret), callback);
                           },
+                          function (ignore, callback) {
+                            uploadToS3(s3, config, uploadDict, callback);
+                          },
                           function (callback) {
                             s3.putObject({
                               'Bucket':config.outBucket, 
@@ -417,7 +421,6 @@ function main() {
                         ], callback);
                       })
                     }
-
                   ],//todo add index/log stuff
                   function (err, result) {
                     if (err)
