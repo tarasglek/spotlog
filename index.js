@@ -405,7 +405,7 @@ function main() {
                           function(callback) {
                             uploadAndCache(config.instanceLogPrefix + logName, JSON.stringify(ret), callback);
                           },
-                          function (ignore, callback) {
+                          function (callback) {
                             uploadToS3(s3, config, uploadDict, callback);
                           },
                           function (callback) {
