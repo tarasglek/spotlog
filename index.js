@@ -366,7 +366,6 @@ function main() {
                     },
                     function (ignore, callback) {
                       uploadToS3(s3, config, uploadDict, callback);
-                      uploadDict = {};
                     },
                     //save state to avoid reprocessing logs next time
                     function (callback) {
@@ -381,6 +380,7 @@ function main() {
                       // each log entry is a linked list pointing at the previous entry
                       // index.txt points at the head of the list
                       var ret = {"instances": Object.keys(uploadDict)}
+                      uploadDict = {};
                       for (var i = ret.instances.length - 1; i >= 0;i--) {
                         if (ret.instances[i].indexOf(config.instancePrefix) == -1)
                           ret.instances.splice(i, 1);
