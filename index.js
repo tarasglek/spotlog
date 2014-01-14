@@ -387,10 +387,7 @@ function main() {
                       var ret = {"instances": Object.keys(uploadDict)}
                       filesToRemove = filesToRemove.concat(Object.keys(uploadDict));
                       uploadDict = {};
-                      for (var i = ret.instances.length - 1; i >= 0;i--) {
-                        if (ret.instances[i].indexOf(config.instancePrefix) == -1)
-                          ret.instances.splice(i, 1);
-                      }
+
                       if (!ret.instances.length) {
                         console.log("Nothing to log");
                         return callback(null, null);
