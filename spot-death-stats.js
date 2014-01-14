@@ -5,13 +5,7 @@ function hours(ms) {
   return Math.ceil((ms)/1000/60/60)
 }
 
-function compute(file) {
-  try {
-    o = JSON.parse(fs.readFileSync(file))
-  } catch(e) {
-    console.log(file, "failed to parse");
-    return
-  }
+function process(o, file) {
   if (!o.spotPriceLog)
     return
 
@@ -26,8 +20,22 @@ function compute(file) {
     ret.hourly_price = ret.total_price/Object.keys(o.spotPriceLog).length
   }
   console.log(JSON.stringify(ret))
-  
 }
 
-for (var i = 2;i< process.argv.length;i++)
-  compute(process.argv[i])
+function compute(file) {
+  try {
+    o = JSON.parse(fs.readFileSync(file))
+  } catch(e) {
+    console.log(file, "failed to parse");
+    return
+  }
+  process(o, file);
+}
+
+if (process.argv)
+  for (var i = 2;i< process.argv.length;i++)
+    compute(process.argv[i])
+
+module.exports = {
+  process: process
+};
