@@ -1,18 +1,28 @@
-const fs = require('fs');
-
+var fs = require('fs');
+var logIterator = require('./log-iterator.js')
 
 function hours(ms) {
   return Math.ceil((ms)/1000/60/60)
 }
 
-function process(o, file) {
+function processInstance(o, file) {
   if (!o.spotPriceLog)
     return
 
   var name = file.replace(/.*\//, "").replace(".json", "");
-  var ret = {"name":name, "total_price":0, "type":o.instance.instanceType,
-             "shutdown":o.StateReason.Code, "terminateTime":o.terminateTime,
-            "availabilityZone":o.instance.placement.availabilityZone}
+
+  var ret = {"name":name,
+             "total_price":0,
+             "terminateTime":o.terminateTime
+            }
+  if (o.instance) {
+    ret.availabilityZone = o.instance.placement.availabilityZone
+    ret.type = o.instance.instanceType
+  }
+  
+  if (o.StateReason) {
+    ret.shutdown = o.StateReason.Code;
+  }
   if (o.spotPriceLog) {
     for (v in o.spotPriceLog) {
       ret.total_price += o.spotPriceLog[v] * 1
@@ -29,13 +39,12 @@ function compute(file) {
     console.log(file, "failed to parse");
     return
   }
-  process(o, file);
+  processInstance(o, file);
 }
 
-if (process.argv)
+/*if (process.argv)
   for (var i = 2;i< process.argv.length;i++)
     compute(process.argv[i])
+*/
 
-module.exports = {
-  process: process
-};
+logIterator.map(processInstance, process.argv[2], 24*60*60*1000, "releng/instances/log/", "releng/instances/info/");
