@@ -5,7 +5,7 @@ function hours(ms) {
   return Math.ceil((ms)/1000/60/60)
 }
 
-function processInstance(o, file) {
+function processInstance(o, file, callback) {
   if (!o.spotPriceLog)
     return
 
@@ -30,6 +30,7 @@ function processInstance(o, file) {
     ret.hourly_price = ret.total_price/Object.keys(o.spotPriceLog).length
   }
   console.log(JSON.stringify(ret))
+  callback(null, null);
 }
 
 function compute(file) {
@@ -47,4 +48,4 @@ function compute(file) {
     compute(process.argv[i])
 */
 
-logIterator.map(processInstance, process.argv[2], 24*60*60*1000, "releng/instances/log/", "releng/instances/info/");
+logIterator.map(processInstance, process.argv[2], 24*60*60*1000, "releng/instances/log/", "releng/instances/info/", function () {console.log("all done")});

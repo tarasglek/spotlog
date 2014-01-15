@@ -32,12 +32,18 @@ function get(url, callback) {
 @LOG_PREFIX eg "releng/instances/log/"
 @INFO_PREFIX eg "releng/instances/info/"
 */
-function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX) {
+function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {
   var logQueue = async.queue(logFetcher, 1);
   var instanceQueue = async.queue(instanceFetcher, 300);
+  logQueue.drain  = instanceQueue.drain = drain;
   var endTime = 0;
   var startTime = 0;
   var instanceGuard = {};
+
+  function drain() {
+    if ((logQueue.length() + instanceQueue.length()) == 0)
+      callback(null, null);
+  }
 
   function instanceFetcher(url, callback) {
     get(url, function (err, data) {
@@ -45,16 +51,11 @@ function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX) {
         console.log("Fail", url);
         return callback(err);
       }
-      try {
-        mapper(JSON.parse(data.toString()), url)
-      } catch (e) {
-        console.log("fail", e);
-      }
-      callback(null, null);
+      mapper(JSON.parse(data.toString()), url, callback)
     });
     //console.log(url)
   }
-
+  
   function logFetcher(logName, callback) {
     var date = logName.replace(".json", "") * 1;
     //console.log(new Date(date))
@@ -66,10 +67,9 @@ function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX) {
       return callback(null, null);
     }
         
-    
     get(baseUrl + LOG_PREFIX + logName, function (err, content) {
       if (err) { 
-        console.log("Didn't find a day of logs to process")
+        console.log("WARNING: "+(endTime - date) + " out of " + PERIOD + " milliseconds of logs processed...then ran out of logs")
         return callback(err);
       }
       var o = JSON.parse(content.toString());
@@ -83,9 +83,6 @@ function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX) {
       callback(null, null);
     })
   }
-  var printer = function (err, body) {
-    //Console.log(err, body.toString());
-  };
 
   get(baseUrl + LOG_PREFIX + "index.txt", function(err, body) {
     logQueue.push(body.toString())
