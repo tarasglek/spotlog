@@ -48,4 +48,4 @@ function compute(file) {
     compute(process.argv[i])
 */
 
-logIterator.map(processInstance, process.argv[2], 24*60*60*1000, "releng/instances/log/", "releng/instances/info/", function () {console.log("all done")});
+logIterator().map(processInstance, process.argv[2], 1000, "releng/instances/log/", "releng/instances/info/", function () {console.log("all done")});

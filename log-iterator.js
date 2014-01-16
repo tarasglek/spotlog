@@ -1,6 +1,10 @@
-var http = require("http")
-var async = require("async")
-var zlib = require("zlib");
+(function () {
+if (typeof module !== 'undefined' && module.exports) {
+  var http = require("http")
+  var async = require("async")
+  var zlib = require("zlib");
+}
+
 
 function get(url, callback) {
   http.get(url, function(res) {
@@ -32,7 +36,7 @@ function get(url, callback) {
 @LOG_PREFIX eg "releng/instances/log/"
 @INFO_PREFIX eg "releng/instances/info/"
 */
-function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {
+function mapLogs(get, mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {
   var logQueue = async.queue(logFetcher, 1);
   var instanceQueue = async.queue(instanceFetcher, 300);
   logQueue.drain  = instanceQueue.drain = drain;
@@ -90,6 +94,24 @@ function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {
 
 } 
 
-module.exports = {
-  map: mapLogs
-};
+logIterator = 
+  function (httpGet) {
+   if (!httpGet)
+     httpGet = get;
+    
+   return {
+     map: function (mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {   
+       mapLogs(httpGet, mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback);
+     }
+   }
+ }
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = logIterator
+}
+// included directly via <script> tag
+else {
+  this.logIterator = logIterator;
+}
+
+})();
