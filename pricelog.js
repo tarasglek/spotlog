@@ -60,12 +60,12 @@ function startStopStats(startStop, launchTime, endTime) {
   return stats
 }
 
+var prices = {'m3.xlarge':0.45, 'm1.medium':0.12, 'm1.small':0.06,'t1.micro':0.02, 'c3.xlarge':0.3, 'c3.2xlarge':0.6}
 function summarize(id, content, timestamp) {
-  var prices = {'m3.xlarge':0.45, 'm1.medium':0.12, 'm1.small':0.01}
   var i = content.instance
   if (!i)
     return
-  
+
   var endTime = content.terminateTime || timestamp
   delete content.instance
   //console.log(JSON.stringify(content))
@@ -75,22 +75,25 @@ function summarize(id, content, timestamp) {
   var uptime = ss ? ss.running : (endTime - launchTime)
   var hours = Math.ceil((uptime)/1000/60/60)
   var cost = null
-  if (content.spotPriceLog) {
+ if (content.spotPriceLog) {
     cost = 0;
-    for (var i in content.spotPriceLog) {
-      cost += content.spotPriceLog[i] * 1
+    for (var x in content.spotPriceLog) {
+      cost += content.spotPriceLog[x] * 1
     }
   } else {
     cost = hours * prices[i.instanceType]
   }
   cost = Math.ceil(cost * 100)/100;
-  
+
   var az = "unknownZone"
   if (i.placement)
     az = i.placement.availabilityZone
 
+
   var type = content.spotPriceLog ? "spot" : "ondemand"
+  
   console.log(id, i.instanceType, hours, cost, stateReason, az, type);
+
 }
 
 function finish() {
