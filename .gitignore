@@ -222,3 +222,6 @@ config.json
 /git.diff
 /logs-wip
 /log.txt
+releng*
+out.txt
+angular*

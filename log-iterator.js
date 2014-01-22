@@ -61,6 +61,8 @@ function foldLogs(get, indexUrl, callback) {
   }
 
   get(indexUrl, function(err, body) {
+    if (err)
+      return callback(err)
     logQueue.push(body.toString(), callback)
   })
 
