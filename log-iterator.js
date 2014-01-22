@@ -44,7 +44,7 @@ function foldLogs(get, indexUrl, callback) {
     return (baseUrl + url).replace("releng/instances/log/","");
   }
   
-  function logFetcher(logName, callback) {
+  function logFetcher(logName, qCallback) {
     var date = logName.replace(".json", "") * 1;
     //console.log(new Date(date))
         
@@ -54,8 +54,11 @@ function foldLogs(get, indexUrl, callback) {
       }
       var o = JSON.parse(content.toString());
       var fixedUp = {"previous":o.previous, "files":o.instances.map(instanceUrlFixer), "timestamp":date};
+      // tell queue that we are done processing this item
+      qCallback(null)
+      // call our callback...can't use q one because it doesn't pass through the return value(lame!)
       if (callback(null, fixedUp)) {
-        logQueue.push(o.previous, callback);
+        logQueue.push(o.previous);
       }
     })
   }
@@ -63,7 +66,7 @@ function foldLogs(get, indexUrl, callback) {
   get(indexUrl, function(err, body) {
     if (err)
       return callback(err)
-    logQueue.push(body.toString(), callback)
+    logQueue.push(body.toString())
   })
 
 } 
