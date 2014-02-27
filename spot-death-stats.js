@@ -6,8 +6,8 @@ function hours(ms) {
 }
 
 function processInstance(o, file, callback) {
-  if (!o.spotPriceLog)
-    return
+//  if (!o.spotPriceLog)
+  //  return
 
   var name = file.replace(/.*\//, "").replace(".json", "");
 
