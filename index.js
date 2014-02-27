@@ -73,7 +73,6 @@ function main() {
                                       function() {
                                         socket.write(str);
                                         socket.on('end', function() {
-                                          console.log("socket ended");
                                           process.exit(0);
                                         })
                                         socket.end();
