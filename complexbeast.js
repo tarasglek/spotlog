@@ -58,6 +58,7 @@ function logItems(config, log, updateJSON, callback) {
 }
 
 function instanceJSONRemoteFromConfig(instanceId, config) {
+  // TODO: make config.instancePrefix relative to info/log/index.txt
   return config.instancePrefix + instanceId + ".json"
 }
 

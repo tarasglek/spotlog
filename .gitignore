@@ -15,6 +15,7 @@ local.properties
 .classpath
 .settings/
 .loadpath
+bower_components/
 
 # External tool builders
 .externalToolBuilders/
@@ -221,3 +222,6 @@ config.json
 /git.diff
 /logs-wip
 /log.txt
+releng*
+out.txt
+angular*

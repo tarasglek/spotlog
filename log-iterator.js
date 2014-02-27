@@ -1,6 +1,10 @@
-var http = require("http")
-var async = require("async")
-var zlib = require("zlib");
+(function () {
+if (typeof module !== 'undefined' && module.exports) {
+  var http = require("http")
+  var async = require("async")
+  var zlib = require("zlib");
+}
+
 
 function get(url, callback) {
   http.get(url, function(res) {
@@ -27,69 +31,65 @@ function get(url, callback) {
 }
 
 /**
-@baseUrl eg http://taras-spot-log-processed.s3.amazonaws.com/ 
-@period eg 24 * 60 * 60 * 1000;//window of data for 1 day
-@LOG_PREFIX eg "releng/instances/log/"
-@INFO_PREFIX eg "releng/instances/info/"
+@get function for downloading urls
+@indexUrl eg http://taras-spot-log-processed.s3.amazonaws.com/releng/instances/log/index.txt"
+@callback (err, dateStamp, {files, previous, timestamp}) 
 */
-function mapLogs(mapper, baseUrl, PERIOD, LOG_PREFIX, INFO_PREFIX, callback) {
+function foldLogs(get, indexUrl, callback) {
   var logQueue = async.queue(logFetcher, 1);
-  var instanceQueue = async.queue(instanceFetcher, 300);
-  logQueue.drain  = instanceQueue.drain = drain;
-  var endTime = 0;
-  var startTime = 0;
-  var instanceGuard = {};
+  var baseUrl = indexUrl.replace(/[^/]+$/, "");
 
-  function drain() {
-    if ((logQueue.length() + instanceQueue.length()) == 0)
-      callback(null, null);
-  }
-
-  function instanceFetcher(url, callback) {
-    get(url, function (err, data) {
-      if (err) {
-        console.log("Fail", url);
-        return callback(err);
-      }
-      mapper(JSON.parse(data.toString()), url, callback)
-    });
-    //console.log(url)
+  function instanceUrlFixer(url) {
+    // TODO, fix* stuff needs to be fixed serverside
+    return (baseUrl + url).replace("releng/instances/log/","");
   }
   
-  function logFetcher(logName, callback) {
+  function logFetcher(logName, qCallback) {
     var date = logName.replace(".json", "") * 1;
     //console.log(new Date(date))
-    if (!endTime) {
-      endTime = date;
-      startTime = endTime - PERIOD
-    } else if (date < startTime) {
-      console.log("Finished narrowing time window");
-      return callback(null, null);
-    }
         
-    get(baseUrl + LOG_PREFIX + logName, function (err, content) {
+    get(baseUrl + logName, function (err, content) {
       if (err) { 
-        console.log("WARNING: "+(endTime - date) + " out of " + PERIOD + " milliseconds of logs processed...then ran out of logs")
         return callback(err);
       }
       var o = JSON.parse(content.toString());
-      logQueue.push(o.previous);
-      o.instances.forEach(function (x) {
-        if (!instanceGuard[x] && x.indexOf(INFO_PREFIX) == 0) {
-          instanceQueue.push(baseUrl + x)
-          instanceGuard[x] = true;
-        }
-      });
-      callback(null, null);
+      var fixedUp = {"previous":o.previous, "files":o.instances.map(instanceUrlFixer), "timestamp":date};
+      // tell queue that we are done processing this item
+      qCallback(null)
+      // call our callback...can't use q one because it doesn't pass through the return value(lame!)
+      if (callback(null, fixedUp)) {
+        logQueue.push(o.previous);
+      }
     })
   }
 
-  get(baseUrl + LOG_PREFIX + "index.txt", function(err, body) {
+  get(indexUrl, function(err, body) {
+    if (err)
+      return callback(err)
     logQueue.push(body.toString())
   })
 
 } 
 
-module.exports = {
-  map: mapLogs
-};
+logIterator = 
+  function (httpGet) {
+   if (!httpGet)
+     httpGet = get;
+    
+   return {
+     foldLogs: function (indexUrl, callback) {
+       foldLogs(httpGet, indexUrl, callback)
+     },
+     get: httpGet
+   }
+ }
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = logIterator
+}
+// included directly via <script> tag
+else {
+  this.logIterator = logIterator;
+}
+
+})();
