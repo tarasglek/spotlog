@@ -5,6 +5,7 @@ const async = require('async');
 const tarasS3 = require('./taras-s3.js');
 const config = JSON.parse(fs.readFileSync("config.json"))
 var net = require('net');
+var DEBUG = process.argv.length > 2;
 
 function describeInstances(region, callback) {
 
@@ -43,6 +44,9 @@ function describeInstances(region, callback) {
         key = "ec2.spot." + key;
       else
         key = "ec2.ondemand." + key
+
+      if (DEBUG)
+        key = "debug_" + key
 
       if (key in summary)
         summary[key]++
@@ -83,7 +87,7 @@ function main() {
 }
 
 // argv check is to enter debug mode if additional args are present
-if (cluster.isMaster && process.argv.length == 2) {
+if (cluster.isMaster && !DEBUG) {
   var wipWorker = null;
 
   // keep restarting the child
