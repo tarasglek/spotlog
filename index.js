@@ -42,13 +42,13 @@ function describeInstances(region, callback) {
       var key = (isSpot ? "ec2.spot." : "ec2.ondemand.") + az + "."
       if (DEBUG)
         key = "debug_" + key
-
-      key += instance.InstanceType.replace('.', '-');
+      var instanceName = instance.InstanceType.replace('.', '-');
       switch (instance.State.Name) {
       case "running":
+        key += instanceName
         break;
       case "terminated":
-        key += ".terminated.";
+        key += "terminated."
         otherkey = key;
 
         if (instance.StateReason.Code == "Server.SpotInstanceTermination") {
@@ -58,13 +58,15 @@ function describeInstances(region, callback) {
           otherkey = key + "spot";
           key += "user";
         }
+        key += "." + instanceName;
+        otherkey += "." + instanceName;
         // make sure to always report 0s if we report termination rates so there is something to compare
         // convoluted logic so we can fill this in for every AZ
         if (!(otherkey in summary))
           summary[otherkey] = 0;
         break;
       default:
-        break;
+        return;
       }
       if (key in summary)
         summary[key]++
