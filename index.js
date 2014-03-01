@@ -8,21 +8,23 @@ var net = require('net');
 var DEBUG = process.argv.length > 2;
 
 function describeInstances(region, callback) {
-
-  var keys = config.logKeys;
-  if (!keys)
-    keys = cfg
-  if (!keys)
-    return callback(new Error("Need keys to call describeInstances"), null)
-  var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},keys))
-  ec2.describeInstances({}, function (err, data) { 
-    if (err)
-      return callback(err)
-    
-    handleDescribeInstances(data, callback)
-  });
-
-  //handleDescribeInstances(JSON.parse(fs.readFileSync("di-"+region+ ".json")), callback);
+  if (!DEBUG) {
+    var keys = config.logKeys;
+    if (!keys)
+      keys = cfg
+    if (!keys)
+      return callback(new Error("Need keys to call describeInstances"), null)
+    var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},keys))
+    ec2.describeInstances({}, function (err, data) { 
+      if (err)
+        return callback(err)
+      
+      handleDescribeInstances(data, callback)
+    });
+  } else {
+    handleDescribeInstances(JSON.parse(fs.readFileSync("di-"+region+ ".json")), callback);    
+  }
+  
   function handleDescribeInstances(di, callback) {
     //fs.writeFileSync("di-"+region+ ".json", JSON.stringify(di))
     var todo = []
@@ -34,24 +36,41 @@ function describeInstances(region, callback) {
     })
     var summary = {};
     todo.forEach(function(instance) {
-      if (instance.State.Name != "running")
-        return;
+      var isSpot = (instance.InstanceLifecycle == "spot")
       //replace last - with a . for easy matching
       var az = instance.Placement.AvailabilityZone.replace(/-([^-]+)$/, ".$1")
-      var key = az + "." 
-            + instance.InstanceType.replace('.', '-');
-      if (instance.InstanceLifecycle == "spot")
-        key = "ec2.spot." + key;
-      else
-        key = "ec2.ondemand." + key
-
+      var key = (isSpot ? "ec2.spot." : "ec2.ondemand.") + az + "."
       if (DEBUG)
         key = "debug_" + key
 
+      key += instance.InstanceType.replace('.', '-');
+      switch (instance.State.Name) {
+      case "running":
+        break;
+      case "terminated":
+        key += ".terminated.";
+        otherkey = key;
+
+        if (instance.StateReason.Code == "Server.SpotInstanceTermination") {
+          otherkey = key + "user";
+          key += "spot";
+        } else {
+          otherkey = key + "spot";
+          key += "user";
+        }
+        // make sure to always report 0s if we report termination rates so there is something to compare
+        // convoluted logic so we can fill this in for every AZ
+        if (!(otherkey in summary))
+          summary[otherkey] = 0;
+        break;
+      default:
+        break;
+      }
       if (key in summary)
         summary[key]++
       else
         summary[key] = 1;
+
       });
     callback(null, summary)
   }
