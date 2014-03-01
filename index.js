@@ -48,6 +48,7 @@ function describeInstances(region, callback) {
         key += instanceName
         break;
       case "terminated":
+        //note: need to persist ids of terminated nodes, otherwise we are counting them multiple times while they hang around in repeated DescribeInstances result sets
         key += "terminated."
         otherkey = key;
 
@@ -61,9 +62,10 @@ function describeInstances(region, callback) {
         key += "." + instanceName;
         otherkey += "." + instanceName;
         // make sure to always report 0s if we report termination rates so there is something to compare
-        // convoluted logic so we can fill this in for every AZ
-        if (!(otherkey in summary))
-          summary[otherkey] = 0;
+        // convoluted logic so we can fill this in for every AZ. Only need this for
+        if (isSpot)
+          if (!(otherkey in summary))
+            summary[otherkey] = 0;
         break;
       default:
         return;
