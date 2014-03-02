@@ -7,6 +7,17 @@ const config = JSON.parse(fs.readFileSync("config.json"))
 var net = require('net');
 var DEBUG = process.argv.length > 2;
 
+var deadNodes = {};
+try {
+  deadNodes = JSON.parse(fs.readFileSync("deadNodes.json"));
+  var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  deadNodes.forEach(function (id) {
+    if (deadNodes[id] < cutoff)
+      delete cutoff[id]
+  })
+} catch(e) {
+}
+
 function describeInstances(region, callback) {
   if (!DEBUG) {
     var keys = config.logKeys;
@@ -48,7 +59,11 @@ function describeInstances(region, callback) {
         key += instanceName
         break;
       case "terminated":
-        //note: need to persist ids of terminated nodes, otherwise we are counting them multiple times while they hang around in repeated DescribeInstances result sets
+        // guard against terminated nodes hanging around for multiple di calls
+        if (instance.InstanceId in deadNodes)
+          return;
+        deadNodes[instance.InstanceId] = Date.now();
+
         key += "terminated."
         otherkey = key;
 
@@ -80,6 +95,10 @@ function describeInstances(region, callback) {
   }
 }
 
+function exit(code) {
+  fs.writeFileSync("deadNodes.json", JSON.stringify(deadNodes));
+  process.exit(code);
+}
 
 function main() {
   var todo = config.describeInstances.map(function (region) {
@@ -100,7 +119,7 @@ function main() {
                                       function() {
                                         socket.write(str);
                                         socket.on('end', function() {
-                                          process.exit(0);
+                                          exit(0);
                                         })
                                         socket.end();
                                         console.log(str);
