@@ -127,7 +127,7 @@ function main() {
                                       });
 
     socket.on('timeout', function() {
-      console.log("Timeout connecting to ", config.carbon.port, config.carbon.host);
+      console.log("Timeout connecting to ", config.carbon.host, config.carbon.port);
       socket.destroy();
     })
     socket.setTimeout(30000);
