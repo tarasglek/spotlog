@@ -21,6 +21,7 @@ function setInterval(callback, delay) {
 	         } else {
 		   console.log("Worker failed with code:"+code)
 	         }
+                 console.log(process.memoryUsage());
 	       });
 
     function loop() {
