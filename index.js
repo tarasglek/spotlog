@@ -117,7 +117,7 @@ function main() {
     var socket = net.createConnection(config.carbon.port, 
                                       config.carbon.host,
                                       function() {
-                                        socket.write(str);
+					socket.write(str);
                                         socket.on('end', function() {
                                           exit(0);
                                         })
@@ -125,9 +125,20 @@ function main() {
                                         console.log(str);
   //                                      process.exit(0);
                                       });
+
+    socket.on('timeout', function() {
+      console.log("Timeout connecting to ", config.carbon.port, config.carbon.host);
+      socket.destroy();
+    })
+    socket.setTimeout(30000);
   });
 }
 
+process.on('uncaughtException', function (err) {
+  console.error((new Date).toUTCString() + ' uncaughtException:', err.message)
+  console.error(err.stack)
+  process.exit(1)
+})
 // argv check is to enter debug mode if additional args are present
 if (cluster.isMaster && !DEBUG) {
   var wipWorker = null;
@@ -138,7 +149,7 @@ if (cluster.isMaster && !DEBUG) {
                wipWorker = null;
 
 	       if (code == 0) {
-		 console.log(new Date, "Looks like worker finished successfully, respawning in ");
+		 console.log(new Date, "Looks like worker finished successfully");
 	       } else {
 		 console.log("Worker failed with code:"+code)
 	       }
