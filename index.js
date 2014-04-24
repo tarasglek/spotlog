@@ -101,6 +101,7 @@ function exit(code) {
 }
 
 function main() {
+  console.log(Date.now(), "polling DescribeInstances");
   var todo = config.describeInstances.map(function (region) {
     return (function(callback) {
       describeInstances(region, callback);
