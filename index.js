@@ -14,4 +14,8 @@ if (config.DEBUG) {
   loop();
 } else {
   interval_cluster.setInterval(loop, 60 * 1000);
+  setTimeout(function () {
+    console.log("Shutting down to restart to avoid OOM");
+    process.exit(0);
+  }, 60*60*1000)
 }
