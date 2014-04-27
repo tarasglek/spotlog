@@ -116,7 +116,8 @@ function logDescribeInstances(config) {
                                       function() {
 					socket.write(str);
                                         socket.on('end', function() {
-                                          process.exit(0);
+                                          //process.exit(0);
+                                          socket.destroy();
                                         })
                                         socket.end();
                                         console.log(str);

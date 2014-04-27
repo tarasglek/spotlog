@@ -5,6 +5,7 @@ config.DEBUG = process.argv.length > 2;
 
 function loop () 
 {
+  console.log(Date.now(), "Starting worker");
   const di_log = require('./di-log.js');
   di_log.logDescribeInstances(config);
 }
