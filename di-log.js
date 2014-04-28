@@ -4,7 +4,7 @@ const async = require('async');
 const tarasS3 = require('./taras-s3.js');
 var net = require('net');
 
-function describeInstances(region, config, callback) {
+function describeInstances(region, config, params, callback) {
   if (!config.DEBUG) {
     var keys = config.logKeys;
     if (!keys)
@@ -12,7 +12,7 @@ function describeInstances(region, config, callback) {
     if (!keys)
       return callback(new Error("Need keys to call describeInstances"), null)
     var ec2 = new AWS.EC2(tarasS3.combineObjects({"region":region},keys))
-    ec2.describeInstances({}, function (err, data) { 
+    ec2.describeInstances(params, function (err, data) { 
       if (err)
         return callback(err)
       
@@ -92,14 +92,19 @@ function describeInstances(region, config, callback) {
         summary[key] = 1;
 
       });
-    callback(null, summary)
+    if (di.NextToken) {
+      console.log("Handling 'NextToken'");
+      describeInstances(region, config, {'NextToken':di.NextToken}, callback)   
+    } else {
+      callback(null, summary)
+    }
   }
 }
 
 function logDescribeInstances(config) {
   var todo = config.describeInstances.map(function (region) {
     return (function(callback) {
-      describeInstances(region, config, callback);
+      describeInstances(region, config, {}, callback);
     })
   })
   async.parallel(todo, function(err, arr) {
@@ -125,6 +130,11 @@ function logDescribeInstances(config) {
 
     socket.on('timeout', function() {
       console.log("Timeout connecting to ", config.carbon.host, config.carbon.port);
+      socket.destroy();
+    })
+
+    socket.on('error', function(err) {
+      console.log("Error connecting to ", config.carbon.host, config.carbon.port, err);
       socket.destroy();
     })
     socket.setTimeout(30000);

@@ -11,8 +11,16 @@ function loop ()
 }
 
 loop();
-setTimeout(function () {
-  console.log("Shutting down to restart to avoid OOM");
-  process.exit(0);
-}, 60*1000)
+if (!config.DEBUG) {
+  setTimeout(function () {
+    console.log("Shutting down to restart to avoid OOM");
+    process.exit(0);
+  }, 60*1000)
+}
 
+
+process.on('uncaughtException', function (err) {
+  console.error((new Date).toUTCString() + ' uncaughtException:', err.message)
+  console.error(err.stack)
+  process.exit(1)
+})
