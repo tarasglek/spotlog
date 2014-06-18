@@ -84,7 +84,7 @@ function analyzeEBS(err, volumes) {
   function handleMetrics(err, res) {
     if (err)
       throw err;
-    //fs.writeFileSync("metrics.json", JSON.stringify(res));
+    fs.writeFileSync("metrics.json", JSON.stringify(res));
     var summary = {};
     res.forEach(function (x) {
       var size = volumes[x.VolumeId].Size;
@@ -119,7 +119,7 @@ function analyzeEBS(err, volumes) {
       return iops_sum(b.Stats) - iops_sum(a.Stats);
     });
     summary_array.forEach(function (x) {
-      var gb_cost = x.Size * 5;
+      var gb_cost = Math.round(x.Size * x.Stats.Volumes * 5 / 730);//gb per hour cost
       var iops_cost = Math.round(iops_sum(x.Stats) * 5 / 1000000);
       console.log("Storage cost: $"+gb_cost/100, "; IOPS cost: $"+iops_cost/100+";", x);
     })
@@ -144,6 +144,7 @@ function listVolumes(callback) {
   });
 }
 
-//analyzeEBS(JSON.parse(fs.readFileSync("ebs_volumes.json")));
+//analyzeEBS(null, JSON.parse(fs.readFileSync("ebs_volumes.json")));
 
 listVolumes(analyzeEBS);
+
